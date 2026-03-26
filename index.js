@@ -2,15 +2,19 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const Anthropic = require('@anthropic-ai/sdk');
+const { createClient } = require('@supabase/supabase-js');
 const fs = require('fs');
 
 const app = express();
 const upload = multer({ dest: 'uploads/' });
+
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 app.use(cors());
 app.use(express.json());
 
+// Verify screenshot endpoint
 app.post('/verify', upload.single('screenshot'), async (req, res) => {
   try {
     const imageData = fs.readFileSync(req.file.path);
@@ -43,7 +47,6 @@ Respond with ONLY a JSON object: {"passed": true} or {"passed": false, "reason":
       }]
     });
 
-    // Clean up uploaded file
     fs.unlinkSync(req.file.path);
 
     const text = response.content.find(c => c.type === 'text')?.text || '';
@@ -54,6 +57,40 @@ Respond with ONLY a JSON object: {"passed": true} or {"passed": false, "reason":
   } catch (err) {
     console.error(err);
     res.status(500).json({ passed: false, reason: 'Server error' });
+  }
+});
+
+// Save registrant endpoint
+app.post('/register', async (req, res) => {
+  try {
+    const { name, email, phone, country, city, course, unique_number } = req.body;
+
+    // Get current month sequence for this course
+    const now = new Date();
+    const year = '26';
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const prefix = `${course}${year}${month}`;
+
+    // Count existing registrants with same course+month prefix
+    const { count } = await supabase
+      .from('registrants')
+      .select('*', { count: 'exact', head: true })
+      .like('unique_number', `${prefix}%`);
+
+    const seq = String((count || 0) + 1).padStart(3, '0');
+    const generatedNumber = `${prefix}${seq}`;
+
+    // Save to database
+    const { data, error } = await supabase
+      .from('registrants')
+      .insert([{ name, email, phone, country, city, course, unique_number: generatedNumber }]);
+
+    if (error) throw error;
+
+    res.json({ success: true, unique_number: generatedNumber });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Could not save registration' });
   }
 });
 
