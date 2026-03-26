@@ -77,8 +77,8 @@ const prefix = `${course}${year}${month}`;`;
     const { count } = await supabase
       .from('registrants')
       .select('*', { count: 'exact', head: true })
-      .like('unique_number', `${prefix}%`);
-
+.like('unique_number', `${prefix}%`);
+``` 
     const seq = String((count || 0) + 1).padStart(3, '0');
     const generatedNumber = `${prefix}${seq}`;
 
