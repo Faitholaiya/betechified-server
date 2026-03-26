@@ -69,10 +69,9 @@ app.post('/register', async (req, res) => {
     const { name, email, phone, country, city, course, unique_number } = req.body;
 
     // Get current month sequence for this course
-    const now = new Date();
     const year = '26';
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const prefix = `${course}${year}${month}`;
+const month = '04'; // ← Update this manually when a new cohort opens
+const prefix = `${course}${year}${month}`;`;
 
     // Count existing registrants with same course+month prefix
     const { count } = await supabase
