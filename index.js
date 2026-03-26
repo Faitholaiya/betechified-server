@@ -35,11 +35,14 @@ app.post('/verify', upload.single('screenshot'), async (req, res) => {
             type: 'text',
             text: `You are verifying a screenshot for BeTechified, a Nigerian tech education platform.
 
-Check if this screenshot shows:
-1. A WhatsApp group chat (not a private/individual chat)
-2. A message about BeTechified — mentioning BeTechified, tech skills, tuition-free program, scholarship alert, product management, data analysis, or similar tech education content
+The screenshot MUST show ALL of the following to pass:
+1. A WhatsApp GROUP chat — NOT a private/individual chat. Look for: group name at the top, multiple participants, group icon. If it shows a single person's name/number at the top, it is an individual chat and must FAIL.
+2. A message about BeTechified — mentioning BeTechified, tech skills, tuition-free program, scholarship alert, product management, data analysis, or similar tech education content.
 
-Be reasonably lenient. If the screenshot clearly shows a WhatsApp group with a BeTechified-related message, that counts.
+STRICT RULES:
+- Individual/private WhatsApp chats = FAIL, even if the message is correct
+- Group chats with the wrong message = FAIL
+- Group chats with a BeTechified-related message = PASS
 
 Respond with ONLY a JSON object: {"passed": true} or {"passed": false, "reason": "brief reason"}`
           }
