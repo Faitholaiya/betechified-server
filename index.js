@@ -72,7 +72,7 @@ Respond with ONLY a JSON object: {"passed": true} or {"passed": false, "reason":
     fs.unlinkSync(req.file.path);
 
     const text = response.content.find(c => c.type === 'text')?.text || '';
-    const clean = text.replace(/```json/g, '').replace(/```/g, '').trim();
+    const clean = text.split('```json').join('').split('```').join('').trim();
     const result = JSON.parse(clean);
 
     res.json(result);
