@@ -85,8 +85,7 @@ const prefix = `${course}${year}${month}`;`;
     // Count existing registrants with same course+month prefix
     const { count } = await supabase
       .from('registrants')
-      .select('*', { count: 'exact', head: true })
-.like('unique_number', prefix + '%');
+      .select('*', { count: 'exact', head: true }).like('unique_number', prefix + '%');
 ``` 
     const seq = String((count || 0) + 1).padStart(3, '0');
     const generatedNumber = `${prefix}${seq}`;
