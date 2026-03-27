@@ -1,3 +1,12 @@
+const { SESClient, SendEmailCommand } = require('@aws-sdk/client-ses');
+
+const ses = new SESClient({
+  region: 'us-east-1',
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+  }
+});
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
@@ -89,7 +98,38 @@ const prefix = `${course}${year}${month}`;`;
 
     if (error) throw error;
 
-    res.json({ success: true, unique_number: generatedNumber });
+    // Send email
+try {
+  await ses.send(new SendEmailCommand({
+    Source: 'newsletter@betechified.com',
+    Destination: { ToAddresses: [email] },
+    Message: {
+      Subject: { Data: `Your BeTechified Unique Number — ${generatedNumber}` },
+      Body: {
+        Html: {
+          Data: `
+            <div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:32px;">
+              <h2 style="color:#D40000;">You're verified! 🎉</h2>
+              <p>Hi ${name},</p>
+              <p>Your unique number for the <strong>${course}</strong> track is:</p>
+              <div style="background:#f5f5f5;border-left:4px solid #D40000;padding:16px 24px;margin:24px 0;font-size:28px;font-weight:bold;letter-spacing:4px;">
+                ${generatedNumber}
+              </div>
+              <p>Use this number to submit your assignments and access the full beginner class.</p>
+              <p>Welcome to BeTechified! 🚀</p>
+              <hr style="margin:32px 0;border:none;border-top:1px solid #eee;" />
+              <p style="color:#888;font-size:12px;">BeTechified — Tech Education for Africa</p>
+            </div>
+          `
+        }
+      }
+    }
+  }));
+} catch (emailErr) {
+  console.error('Email error:', emailErr);
+}
+
+res.json({ success: true, unique_number: generatedNumber });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, error: 'Could not save registration' });
