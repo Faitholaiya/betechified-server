@@ -83,10 +83,13 @@ const month = '04'; // ← Update this manually when a new cohort opens
 const prefix = `${course}${year}${month}`;`;
 
     // Count existing registrants with same course+month prefix
-    const { count } = await supabase
+    const { data: existing } = await supabase
       .from('registrants')
-      .select('*', { count: 'exact', head: true }).like('unique_number', prefix + '%');
-``` 
+      .select('unique_number')
+      .like('unique_number', prefix + '%');
+
+const count = existing ? existing.length : 0;
+```
     const seq = String((count || 0) + 1).padStart(3, '0');
     const generatedNumber = `${prefix}${seq}`;
 
