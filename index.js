@@ -30,34 +30,44 @@ app.post('/verify', upload.single('screenshot'), async (req, res) => {
     const base64 = imageData.toString('base64');
     const mediaType = req.file.mimetype;
 
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
-      messages: [{
-        role: 'user',
-        content: [
-          {
-            type: 'image',
-            source: { type: 'base64', media_type: mediaType, data: base64 }
-          },
-          {
-            type: 'text',
-            text: `You are verifying a screenshot for BeTechified, a Nigerian tech education platform.
+   let response;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        response = await client.messages.create({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1000,
+          messages: [{
+            role: 'user',
+            content: [
+              {
+                type: 'image',
+                source: { type: 'base64', media_type: mediaType, data: base64 }
+              },
+              {
+                type: 'text',
+                text: `You are verifying a screenshot for BeTechified, a Nigerian tech education platform.
 
 The screenshot MUST show ALL of the following to pass:
-1. A WhatsApp GROUP chat — NOT a private/individual chat. Look for: group name at the top, multiple participants, group icon. If it shows a single person's name/number at the top, it is an individual chat and must FAIL.
+1. A WhatsApp GROUP chat — NOT a private/individual chat.
 2. A message about BeTechified — mentioning BeTechified, tech skills, tuition-free program, scholarship alert, product management, data analysis, or similar tech education content.
 
 STRICT RULES:
-- Individual/private WhatsApp chats = FAIL, even if the message is correct
-- Group chats with the wrong message = FAIL
-- Group chats with a BeTechified-related message = PASS
+- Individual/private WhatsApp chats = FAIL
+- Group chats with wrong message = FAIL
+- Group chats with BeTechified message = PASS
 
 Respond with ONLY a JSON object: {"passed": true} or {"passed": false, "reason": "brief reason"}`
-          }
-        ]
-      }]
-    });
+              }
+            ]
+          }]
+        });
+        break;
+      } catch (err) {
+        if (attempt === 2) throw err;
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    }
+```
 
     fs.unlinkSync(req.file.path);
 
