@@ -57,7 +57,8 @@ app.post('/verify', upload.single('screenshot'), async (req, res) => {
 
     fs.unlinkSync(req.file.path);
 
-    const text = response.content.find(c => c.type === 'text') ? response.content.find(c => c.type === 'text').text : '';
+    const textContent = response.content.find(c => c.type === 'text');
+    const text = textContent ? textContent.text : '';
     const clean = text.replace(/```json/g, '').replace(/```/g, '').trim();
     const result = JSON.parse(clean);
 
@@ -87,14 +88,18 @@ app.post('/register', async (req, res) => {
       return res.json({ success: false, already_registered: true, unique_number: existingEmail[0].unique_number });
     }
 
-    // Count existing registrants with same course+month prefix
+    // Get all existing numbers for this prefix to find the highest
     const { data: existing } = await supabase
       .from('registrants')
       .select('unique_number')
       .like('unique_number', prefix + '%');
 
-    const count = existing ? existing.length : 0;
-    const seq = String(count + 1).padStart(3, '0');
+    let nextSeq = 1;
+    if (existing && existing.length > 0) {
+      const numbers = existing.map(r => parseInt(r.unique_number.slice(-3)));
+      nextSeq = Math.max(...numbers) + 1;
+    }
+    const seq = String(nextSeq).padStart(3, '0');
     const generatedNumber = prefix + seq;
 
     // Save to database
@@ -135,3 +140,4 @@ app.get('/', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log('Server running on port ' + PORT));
+```
