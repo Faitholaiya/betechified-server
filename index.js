@@ -2,14 +2,14 @@ const { SESClient, SendEmailCommand } = require('@aws-sdk/client-ses');
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
-const Anthropic = require('@anthropic-ai/sdk');
+const OpenAI = require('openai');
 const { createClient } = require('@supabase/supabase-js');
 const fs = require('fs');
 
 const app = express();
 const upload = multer({ dest: 'uploads/' });
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 const ses = new SESClient({
   region: 'us-east-1',
@@ -31,15 +31,15 @@ app.post('/verify', upload.single('screenshot'), async (req, res) => {
     let response;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        response = await client.messages.create({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 1000,
+        response = await openai.chat.completions.create({
+          model: 'gpt-4o-mini',
+          max_tokens: 200,
           messages: [{
             role: 'user',
             content: [
               {
-                type: 'image',
-                source: { type: 'base64', media_type: mediaType, data: base64 }
+                type: 'image_url',
+                image_url: { url: 'data:' + mediaType + ';base64,' + base64 }
               },
               {
                 type: 'text',
@@ -57,8 +57,7 @@ app.post('/verify', upload.single('screenshot'), async (req, res) => {
 
     fs.unlinkSync(req.file.path);
 
-    const textContent = response.content.find(c => c.type === 'text');
-    const text = textContent ? textContent.text : '';
+    const text = response.choices[0].message.content || '';
     const clean = text.replace(/```json/g, '').replace(/```/g, '').trim();
     const result = JSON.parse(clean);
 
@@ -77,7 +76,6 @@ app.post('/register', async (req, res) => {
     const month = '04';
     const prefix = course + year + month;
 
-    // Check if email already registered this cohort
     const { data: existingEmail } = await supabase
       .from('registrants')
       .select('unique_number')
@@ -88,7 +86,6 @@ app.post('/register', async (req, res) => {
       return res.json({ success: false, already_registered: true, unique_number: existingEmail[0].unique_number });
     }
 
-    // Get all existing numbers for this prefix to find the highest
     const { data: existing } = await supabase
       .from('registrants')
       .select('unique_number')
@@ -102,14 +99,12 @@ app.post('/register', async (req, res) => {
     const seq = String(nextSeq).padStart(3, '0');
     const generatedNumber = prefix + seq;
 
-    // Save to database
     const { error } = await supabase
       .from('registrants')
       .insert([{ name, email, phone, country, city, course, unique_number: generatedNumber }]);
 
     if (error) throw error;
 
-    // Send email
     try {
       await ses.send(new SendEmailCommand({
         Source: 'newsletter@betechified.com',
@@ -131,6 +126,39 @@ app.post('/register', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, error: 'Could not save registration' });
+  }
+});
+
+app.post('/send-bulk', async (req, res) => {
+  try {
+    const { recipients, subject, body } = req.body;
+    let sent = 0;
+
+    for (const recipient of recipients) {
+      try {
+        await ses.send(new SendEmailCommand({
+          Source: 'newsletter@betechified.com',
+          Destination: { ToAddresses: [recipient.email] },
+          Message: {
+            Subject: { Data: subject },
+            Body: {
+              Html: {
+                Data: '<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:32px;"><h2 style="color:#D40000;">BeTechified</h2><p>Hi ' + recipient.name + ',</p>' + body.replace(/\n/g, '<br/>') + '<hr style="margin:32px 0;border:none;border-top:1px solid #eee;" /><p style="color:#888;font-size:12px;">BeTechified — Tech Education for Africa</p></div>'
+              }
+            }
+          }
+        }));
+        sent++;
+        await new Promise(r => setTimeout(r, 100));
+      } catch (emailErr) {
+        console.error('Failed to send to ' + recipient.email + ':', emailErr.message);
+      }
+    }
+
+    res.json({ success: true, sent });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Bulk send failed' });
   }
 });
 
