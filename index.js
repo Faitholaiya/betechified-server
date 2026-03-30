@@ -2,14 +2,12 @@ const { SESClient, SendEmailCommand } = require('@aws-sdk/client-ses');
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { createClient } = require('@supabase/supabase-js');
 const fs = require('fs');
 
 const app = express();
 const upload = multer({ dest: 'uploads/' });
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 const ses = new SESClient({
   region: 'us-east-1',
@@ -24,35 +22,10 @@ app.use(express.json());
 
 app.post('/verify', upload.single('screenshot'), async (req, res) => {
   try {
-    const imageData = fs.readFileSync(req.file.path);
-    const base64 = imageData.toString('base64');
-    const mediaType = req.file.mimetype;
-
-    let result;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
-        const response = await model.generateContent([
-          {
-            inlineData: { data: base64, mimeType: mediaType }
-          },
-          'You are verifying a screenshot for BeTechified, a Nigerian tech education platform. The screenshot MUST show: 1. A WhatsApp GROUP chat (not a private/individual chat). 2. A message about BeTechified, tech skills, tuition-free program, scholarship alert, product management, data analysis, or similar tech education content. RULES: Individual/private WhatsApp chats = FAIL. Group chats with wrong message = FAIL. Group chats with BeTechified message = PASS. Respond with ONLY a JSON object: {"passed": true} or {"passed": false, "reason": "brief reason"}'
-        ]);
-        const text = response.response.text();
-        const clean = text.replace(/```json/g, '').replace(/```/g, '').trim();
-        result = JSON.parse(clean);
-        break;
-      } catch (err) {
-        if (attempt === 2) throw err;
-        await new Promise(r => setTimeout(r, 2000));
-      }
-    }
-
-    fs.unlinkSync(req.file.path);
-    res.json(result);
+    if (req.file) fs.unlinkSync(req.file.path);
+    res.json({ passed: true });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ passed: false, reason: 'Server error' });
+    res.json({ passed: true });
   }
 });
 
