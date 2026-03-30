@@ -13,6 +13,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
     "@aws-sdk/client-ses": "^3.1018.0",
+    "@google/generative-ai": "^0.24.1",
     "@supabase/supabase-js": "^2.100.0",
     "anthropic": "^0.0.0",
     "cors": "^2.8.6",

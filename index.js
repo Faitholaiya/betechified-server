@@ -2,14 +2,14 @@ const { SESClient, SendEmailCommand } = require('@aws-sdk/client-ses');
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
-const OpenAI = require('openai');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { createClient } = require('@supabase/supabase-js');
 const fs = require('fs');
 
 const app = express();
 const upload = multer({ dest: 'uploads/' });
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 const ses = new SESClient({
   region: 'us-east-1',
@@ -28,26 +28,19 @@ app.post('/verify', upload.single('screenshot'), async (req, res) => {
     const base64 = imageData.toString('base64');
     const mediaType = req.file.mimetype;
 
-    let response;
+    let result;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        response = await openai.chat.completions.create({
-          model: 'gpt-4o-mini',
-          max_tokens: 200,
-          messages: [{
-            role: 'user',
-            content: [
-              {
-                type: 'image_url',
-                image_url: { url: 'data:' + mediaType + ';base64,' + base64 }
-              },
-              {
-                type: 'text',
-                text: 'You are verifying a screenshot for BeTechified, a Nigerian tech education platform. The screenshot MUST show: 1. A WhatsApp GROUP chat (not a private/individual chat). 2. A message about BeTechified, tech skills, tuition-free program, scholarship alert, product management, data analysis, or similar tech education content. RULES: Individual/private WhatsApp chats = FAIL. Group chats with wrong message = FAIL. Group chats with BeTechified message = PASS. Respond with ONLY a JSON object: {"passed": true} or {"passed": false, "reason": "brief reason"}'
-              }
-            ]
-          }]
-        });
+        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+        const response = await model.generateContent([
+          {
+            inlineData: { data: base64, mimeType: mediaType }
+          },
+          'You are verifying a screenshot for BeTechified, a Nigerian tech education platform. The screenshot MUST show: 1. A WhatsApp GROUP chat (not a private/individual chat). 2. A message about BeTechified, tech skills, tuition-free program, scholarship alert, product management, data analysis, or similar tech education content. RULES: Individual/private WhatsApp chats = FAIL. Group chats with wrong message = FAIL. Group chats with BeTechified message = PASS. Respond with ONLY a JSON object: {"passed": true} or {"passed": false, "reason": "brief reason"}'
+        ]);
+        const text = response.response.text();
+        const clean = text.replace(/```json/g, '').replace(/```/g, '').trim();
+        result = JSON.parse(clean);
         break;
       } catch (err) {
         if (attempt === 2) throw err;
@@ -56,11 +49,6 @@ app.post('/verify', upload.single('screenshot'), async (req, res) => {
     }
 
     fs.unlinkSync(req.file.path);
-
-    const text = response.choices[0].message.content || '';
-    const clean = text.replace(/```json/g, '').replace(/```/g, '').trim();
-    const result = JSON.parse(clean);
-
     res.json(result);
   } catch (err) {
     console.error(err);
