@@ -31,7 +31,7 @@ app.post('/verify', upload.single('screenshot'), async (req, res) => {
     let result;
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
-        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+        const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
         const response = await model.generateContent([
           {
             inlineData: { data: base64, mimeType: mediaType }
