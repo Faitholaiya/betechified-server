@@ -3,10 +3,12 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const { createClient } = require('@supabase/supabase-js');
-const fs = require('fs');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
-const upload = multer({ dest: 'uploads/' });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 const ses = new SESClient({
@@ -20,12 +22,65 @@ const ses = new SESClient({
 app.use(cors());
 app.use(express.json());
 
-app.post('/verify', upload.single('screenshot'), async (req, res) => {
+const GEMINI_PROMPT = `You are a verification assistant for BeTechified, an African tech education platform.
+Check whether this screenshot shows BOTH of the following:
+1. A WhatsApp GROUP chat (not a personal/direct chat — must show a group name or multiple participants visible)
+2. A message about BeTechified visible in the chat (mentions "BeTechified", a registration link, a BeTechified course, or the platform by name — exact wording not required)
+
+Respond with ONLY valid JSON, no markdown, no explanation:
+{"valid": true} or {"valid": false, "reason": "short reason"}`;
+
+app.post('/verify', upload.array('screenshots', 5), async (req, res) => {
   try {
-    if (req.file) fs.unlinkSync(req.file.path);
+    const files = req.files;
+
+    if (!files || files.length === 0) {
+      return res.status(400).json({ passed: false, message: 'No screenshots uploaded.' });
+    }
+    if (files.length < 5) {
+      return res.status(400).json({ passed: false, message: `Please upload all 5 screenshots. You only uploaded ${files.length}.` });
+    }
+
+    // Duplicate detection via size + first-bytes fingerprint
+    const fingerprints = files.map(f => f.size + '-' + f.buffer.slice(0, 16).toString('hex'));
+    if (new Set(fingerprints).size < files.length) {
+      return res.status(400).json({ passed: false, message: 'Duplicate screenshots detected. Each screenshot must be from a different WhatsApp group.' });
+    }
+
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      let parsed;
+      try {
+        const result = await model.generateContent([
+          GEMINI_PROMPT,
+          { inlineData: { mimeType: file.mimetype || 'image/jpeg', data: file.buffer.toString('base64') } }
+        ]);
+        const text = result.response.text().trim().replace(/```json|```/g, '').trim();
+        parsed = JSON.parse(text);
+      } catch (err) {
+        console.error('Gemini error on screenshot ' + (i + 1) + ':', err.message);
+        return res.status(400).json({
+          passed: false,
+          screenshotIndex: i + 1,
+          message: 'Screenshot ' + (i + 1) + ' could not be verified. Please re-upload a clearer image.'
+        });
+      }
+
+      if (!parsed.valid) {
+        return res.status(400).json({
+          passed: false,
+          screenshotIndex: i + 1,
+          message: 'Screenshot ' + (i + 1) + ' was rejected: ' + (parsed.reason || 'does not show a WhatsApp group chat with a BeTechified message') + '. Please re-upload that screenshot.'
+        });
+      }
+    }
+
     res.json({ passed: true });
   } catch (err) {
-    res.json({ passed: true });
+    console.error('Verify error:', err);
+    res.status(500).json({ passed: false, message: 'Server error during verification.' });
   }
 });
 
