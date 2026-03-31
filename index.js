@@ -47,7 +47,7 @@ app.post('/verify', upload.array('screenshots', 5), async (req, res) => {
       return res.status(400).json({ passed: false, message: 'Duplicate screenshots detected. Each screenshot must be from a different WhatsApp group.' });
     }
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-lite' });
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
