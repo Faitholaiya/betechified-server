@@ -107,7 +107,7 @@ app.post('/register', async (req, res) => {
       return res.json({ success: false, already_registered: true, unique_number: existingEmail[0].unique_number });
     }
 
-    // Get highest existing number for this prefix — fetch top 10 and pick highest numerically
+    // Fetch last 500 registrations for this course and pick highest number mathematically
     const { data: existing } = await supabase
       .from('registrants')
       .select('unique_number')
@@ -118,9 +118,9 @@ app.post('/register', async (req, res) => {
     let nextSeq = 1;
     if (existing && existing.length > 0) {
       const nums = existing
-        .map(r => parseInt(r.unique_number.slice(prefix.length)))
+        .map(r => parseInt(r.unique_number.replace(prefix, '')))
         .filter(n => !isNaN(n));
-      nextSeq = Math.max(...nums) + 1;
+      if (nums.length > 0) nextSeq = Math.max(...nums) + 1;
     }
     const generatedNumber = prefix + String(nextSeq);
 
@@ -198,22 +198,36 @@ app.post('/notify-fixed', async (req, res) => {
   }
 
   try {
-    const { data: allDA, error } = await supabase
-      .from('registrants')
-      .select('name, email, unique_number')
-      .eq('course', 'DA')
-      .limit(2000);
+    // Fetch all DA registrants in batches of 1000
+    let allDA = [];
+    let from = 0;
+    const PAGE = 1000;
+    while (true) {
+      const { data, error } = await supabase
+        .from('registrants')
+        .select('name, email, unique_number')
+        .eq('course', 'DA')
+        .range(from, from + PAGE - 1);
+      if (error) throw error;
+      if (!data || data.length === 0) break;
+      allDA = allDA.concat(data);
+      if (data.length < PAGE) break;
+      from += PAGE;
+    }
 
-    if (error) throw error;
-
-    const data = allDA.filter(r => {
-      const num = parseInt(r.unique_number.slice(6));
+    // Filter: only DA numbers above 1000
+    const toNotify = allDA.filter(r => {
+      const numPart = r.unique_number.replace('DA2604', '');
+      const num = parseInt(numPart);
       return !isNaN(num) && num > 1000;
-      });
+    });
 
-    console.log('Total DA fetched:', allDA.length, 'Filtered:', data.length);
+    console.log('Total DA fetched:', allDA.length, 'To notify:', toNotify.length);
 
-    for (const person of data) {
+    let sent = 0;
+    let failed = 0;
+
+    for (const person of toNotify) {
       try {
         await ses.send(new SendEmailCommand({
           Source: 'newsletter@betechified.com',
