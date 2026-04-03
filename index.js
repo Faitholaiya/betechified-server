@@ -187,6 +187,64 @@ app.post('/send-bulk', async (req, res) => {
   }
 });
 
+// ── /notify-fixed ──────────────────────────────────────────────────────────
+app.post('/notify-fixed', async (req, res) => {
+  const { secret } = req.body;
+  if (secret !== 'betechfix2026') {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('registrants')
+      .select('name, email, unique_number')
+      .eq('course', 'DA')
+      .gte('unique_number', 'DA26041532')
+      .order('unique_number', { ascending: true });
+
+    if (error) throw error;
+
+    let sent = 0;
+    let failed = 0;
+
+    for (const person of data) {
+      try {
+        await ses.send(new SendEmailCommand({
+          Source: 'newsletter@betechified.com',
+          Destination: { ToAddresses: [person.email] },
+          Message: {
+            Subject: { Data: 'Your Correct BeTechified Unique Number' },
+            Body: {
+              Html: {
+                Data: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:32px;">
+                  <h2 style="color:#D40000;">Important Update 🔔</h2>
+                  <p>Hi ${person.name},</p>
+                  <p>Due to a technical issue, your BeTechified unique number was updated. Your correct number is:</p>
+                  <div style="background:#f5f5f5;border-left:4px solid #D40000;padding:16px 24px;margin:24px 0;font-size:28px;font-weight:bold;letter-spacing:4px;">${person.unique_number}</div>
+                  <p>Please use this number going forward for assignments and class access. We apologise for any confusion.</p>
+                  <p>Welcome to BeTechified! 🚀</p>
+                  <hr style="margin:32px 0;border:none;border-top:1px solid #eee;" />
+                  <p style="color:#888;font-size:12px;">BeTechified — Tech Education for Africa</p>
+                </div>`
+              }
+            }
+          }
+        }));
+        sent++;
+        await new Promise(r => setTimeout(r, 150));
+      } catch (emailErr) {
+        console.error('Failed to notify ' + person.email + ':', emailErr.message);
+        failed++;
+      }
+    }
+
+    res.json({ success: true, sent, failed });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Notification failed' });
+  }
+});
+
 // ── Keep Supabase alive ────────────────────────────────────────────────────
 const FOUR_DAYS = 4 * 24 * 60 * 60 * 1000;
 setInterval(async () => {
