@@ -92,6 +92,12 @@ app.post('/register', async (req, res) => {
   try {
     const { name, email, phone, country, city, course } = req.body;
 
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ success: false, error: 'Invalid email address.' });
+    }
+
     const year = '26';
     const month = '04';
     const prefix = course + year + month;
@@ -107,17 +113,26 @@ app.post('/register', async (req, res) => {
       return res.json({ success: false, already_registered: true, unique_number: existingEmail[0].unique_number });
     }
 
-    // Fetch last 500 registrations for this course and pick highest number mathematically
-    const { data: existing } = await supabase
-      .from('registrants')
-      .select('unique_number')
-      .like('unique_number', prefix + '%')
-      .order('created_at', { ascending: false })
-      .limit(500);
+    // Fetch ALL numbers for this course prefix and pick highest mathematically
+    let allExisting = [];
+    let from = 0;
+    const PAGE = 1000;
+    while (true) {
+      const { data, error } = await supabase
+        .from('registrants')
+        .select('unique_number')
+        .like('unique_number', prefix + '%')
+        .range(from, from + PAGE - 1);
+      if (error) throw error;
+      if (!data || data.length === 0) break;
+      allExisting = allExisting.concat(data);
+      if (data.length < PAGE) break;
+      from += PAGE;
+    }
 
     let nextSeq = 1;
-    if (existing && existing.length > 0) {
-      const nums = existing
+    if (allExisting.length > 0) {
+      const nums = allExisting
         .map(r => parseInt(r.unique_number.replace(prefix, '')))
         .filter(n => !isNaN(n));
       if (nums.length > 0) nextSeq = Math.max(...nums) + 1;
@@ -198,7 +213,7 @@ app.post('/notify-fixed', async (req, res) => {
   }
 
   try {
-    // Fetch all DA registrants in batches of 1000
+    // Fetch all DA registrants in batches
     let allDA = [];
     let from = 0;
     const PAGE = 1000;
