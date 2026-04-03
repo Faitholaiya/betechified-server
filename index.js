@@ -202,6 +202,7 @@ app.post('/notify-fixed', async (req, res) => {
       .from('registrants')
       .select('name, email, unique_number')
       .eq('course', 'DA')
+      .limit(2000);
 
     if (error) throw error;
 
@@ -210,8 +211,7 @@ app.post('/notify-fixed', async (req, res) => {
       return !isNaN(num) && num > 1000;
       });
 
-    let sent = 0;
-    let failed = 0;
+    console.log('Total DA fetched:', allDA.length, 'Filtered:', data.length);
 
     for (const person of data) {
       try {
