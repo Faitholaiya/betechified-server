@@ -198,14 +198,17 @@ app.post('/notify-fixed', async (req, res) => {
   }
 
   try {
-    const { data, error } = await supabase
+    const { data: allDA, error } = await supabase
       .from('registrants')
       .select('name, email, unique_number')
       .eq('course', 'DA')
-      .gte('unique_number', 'DA26041532')
-      .order('unique_number', { ascending: true });
 
     if (error) throw error;
+
+    const data = allDA.filter(r => {
+      const num = parseInt(r.unique_number.slice(6));
+      return !isNaN(num) && num > 1000;
+      });
 
     let sent = 0;
     let failed = 0;
