@@ -109,10 +109,10 @@ app.post('/register', async (req, res) => {
 
     let nextSeq = 1;
     if (existing && existing.length > 0) {
-      const numbers = existing.map(r => parseInt(r.unique_number.slice(-3)));
+      const numbers = existing.map(r => parseInt(r.unique_number.slice(prefix.length)));
       nextSeq = Math.max(...numbers) + 1;
     }
-    const seq = String(nextSeq).padStart(3, '0');
+    const seq = String(nextSeq);
     const generatedNumber = prefix + seq;
 
     const { error } = await supabase
