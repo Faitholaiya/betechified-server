@@ -23,13 +23,15 @@ app.use(cors());
 app.use(express.json());
 
 const GEMINI_PROMPT = `You are a verification assistant for BeTechified, an African tech education platform.
-Check whether this screenshot shows BOTH of the following:
-1. A WhatsApp GROUP chat (not a personal/direct chat — must show a group name or multiple participants visible)
-2. A message about BeTechified visible in the chat (mentions "BeTechified", a registration link, a BeTechified course, or the platform by name — exact wording not required)
+Check whether this screenshot is a WhatsApp chat that contains a message related to BeTechified (a tech education platform, course, or registration).
+
+Be LENIENT — if there is reasonable evidence of either a group chat or a BeTechified-related message, pass it.
+Only reject if the screenshot is clearly not WhatsApp at all, or has absolutely no connection to BeTechified.
 
 Respond with ONLY valid JSON, no markdown, no explanation:
 {"valid": true} or {"valid": false, "reason": "short reason"}`;
 
+// ── /verify ────────────────────────────────────────────────────────────────
 app.post('/verify', upload.array('screenshots', 5), async (req, res) => {
   try {
     const files = req.files;
@@ -41,7 +43,7 @@ app.post('/verify', upload.array('screenshots', 5), async (req, res) => {
       return res.status(400).json({ passed: false, message: `Please upload all 5 screenshots. You only uploaded ${files.length}.` });
     }
 
-    // Duplicate detection via size + first-bytes fingerprint
+    // Duplicate detection
     const fingerprints = files.map(f => f.size + '-' + f.buffer.slice(0, 16).toString('hex'));
     if (new Set(fingerprints).size < files.length) {
       return res.status(400).json({ passed: false, message: 'Duplicate screenshots detected. Each screenshot must be from a different WhatsApp group.' });
@@ -84,6 +86,7 @@ app.post('/verify', upload.array('screenshots', 5), async (req, res) => {
   }
 });
 
+// ── /register ──────────────────────────────────────────────────────────────
 app.post('/register', async (req, res) => {
   try {
     const { name, email, phone, country, city, course } = req.body;
@@ -92,6 +95,7 @@ app.post('/register', async (req, res) => {
     const month = '04';
     const prefix = course + year + month;
 
+    // Check if already registered
     const { data: existingEmail } = await supabase
       .from('registrants')
       .select('unique_number')
@@ -102,25 +106,29 @@ app.post('/register', async (req, res) => {
       return res.json({ success: false, already_registered: true, unique_number: existingEmail[0].unique_number });
     }
 
+    // Get highest existing number for this prefix
     const { data: existing } = await supabase
       .from('registrants')
       .select('unique_number')
-      .like('unique_number', prefix + '%');
+      .like('unique_number', prefix + '%')
+      .order('unique_number', { ascending: false })
+      .limit(1);
 
     let nextSeq = 1;
     if (existing && existing.length > 0) {
-      const numbers = existing.map(r => parseInt(r.unique_number.slice(prefix.length)));
-      nextSeq = Math.max(...numbers) + 1;
+      const lastNum = parseInt(existing[0].unique_number.slice(prefix.length));
+      if (!isNaN(lastNum)) nextSeq = lastNum + 1;
     }
-    const seq = String(nextSeq);
-    const generatedNumber = prefix + seq;
+    const generatedNumber = prefix + String(nextSeq);
 
+    // Save to Supabase
     const { error } = await supabase
       .from('registrants')
       .insert([{ name, email, phone, country, city, course, unique_number: generatedNumber }]);
 
     if (error) throw error;
 
+    // Send confirmation email
     try {
       await ses.send(new SendEmailCommand({
         Source: 'newsletter@betechified.com',
@@ -145,6 +153,7 @@ app.post('/register', async (req, res) => {
   }
 });
 
+// ── /send-bulk ─────────────────────────────────────────────────────────────
 app.post('/send-bulk', async (req, res) => {
   try {
     const { recipients, subject, body } = req.body;
@@ -178,6 +187,18 @@ app.post('/send-bulk', async (req, res) => {
   }
 });
 
+// ── Keep Supabase alive ────────────────────────────────────────────────────
+const FOUR_DAYS = 4 * 24 * 60 * 60 * 1000;
+setInterval(async () => {
+  try {
+    await supabase.from('registrants').select('id').limit(1);
+    console.log('Supabase keep-alive ping sent');
+  } catch (err) {
+    console.error('Keep-alive ping failed:', err.message);
+  }
+}, FOUR_DAYS);
+
+// ── Start ──────────────────────────────────────────────────────────────────
 app.get('/', (req, res) => {
   res.send('BeTechified Verification Server is running ✅');
 });
