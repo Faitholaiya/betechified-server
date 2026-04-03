@@ -112,8 +112,8 @@ app.post('/register', async (req, res) => {
       .from('registrants')
       .select('unique_number')
       .like('unique_number', prefix + '%')
-      .order('unique_number', { ascending: false })
-      .limit(10);
+      .order('created_at', { ascending: false })
+      .limit(500);
 
     let nextSeq = 1;
     if (existing && existing.length > 0) {
