@@ -137,7 +137,7 @@ app.post('/register', async (req, res) => {
         .filter(n => !isNaN(n));
       if (nums.length > 0) nextSeq = Math.max(...nums) + 1;
     }
-    const generatedNumber = prefix + String(nextSeq);
+    const generatedNumber = prefix + String(nextSeq).padStart(4, '0');
 
     // Save to Supabase
     const { error } = await supabase
