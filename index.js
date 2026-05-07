@@ -4,6 +4,7 @@ const cors = require('cors');
 const multer = require('multer');
 const { createClient } = require('@supabase/supabase-js');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { google } = require('googleapis'); // npm install googleapis
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -31,6 +32,73 @@ Only reject if the screenshot is clearly not WhatsApp at all, or has absolutely 
 
 Respond with ONLY valid JSON, no markdown, no explanation:
 {"valid": true} or {"valid": false, "reason": "short reason"}`;
+
+
+// ── Google Sheets helper ───────────────────────────────────────────────────
+const getEmailList = async (sheetId, range) => {
+  const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+  const auth = new google.auth.GoogleAuth({
+    credentials,
+    scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly']
+  });
+
+  const sheets = google.sheets({ version: 'v4', auth });
+  const response = await sheets.spreadsheets.values.get({
+    spreadsheetId: sheetId,
+    range: range
+  });
+
+  const rows = response.data.values || [];
+  return rows
+    .slice(1) // skip header row
+    .map(row => ({ name: (row[0] || '').trim(), email: (row[1] || '').trim() }))
+    .filter(r => r.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.email));
+};
+
+// ── Campaign send helper ───────────────────────────────────────────────────
+const sendCampaignEmails = async (recipients, subject, htmlTemplate) => {
+  const BATCH_SIZE = 14; // SES default rate limit is 14/sec
+  let sent = 0;
+  let failed = 0;
+
+  for (let i = 0; i < recipients.length; i += BATCH_SIZE) {
+    const batch = recipients.slice(i, i + BATCH_SIZE);
+
+    await Promise.allSettled(batch.map(async (recipient) => {
+      try {
+        const personalised = `
+          <div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:32px;">
+            ${htmlTemplate
+              .replace(/{{name}}/g, recipient.name)
+              .replace(/{{email}}/g, recipient.email)}
+            <hr style="margin:32px 0;border:none;border-top:1px solid #eee;" />
+            <p style="color:#888;font-size:12px;">BeTechified — Tech Education for Africa</p>
+          </div>`;
+
+        await ses.send(new SendEmailCommand({
+          Source: 'BeTechified <newsletter@betechified.com>',
+          Destination: { ToAddresses: [recipient.email] },
+          Message: {
+            Subject: { Data: subject },
+            Body: { Html: { Data: personalised } }
+          }
+        }));
+        sent++;
+      } catch (e) {
+        console.error('Failed to send to ' + recipient.email + ':', e.message);
+        failed++;
+      }
+    }));
+
+    // Pause 1 second between batches to respect SES rate limits
+    if (i + BATCH_SIZE < recipients.length) {
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+
+  return { sent, failed };
+};
+
 
 // ── /verify ────────────────────────────────────────────────────────────────
 app.post('/verify', upload.array('screenshots', 5), async (req, res) => {
@@ -202,6 +270,53 @@ app.post('/send-bulk', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, error: 'Bulk send failed' });
+  }
+});
+
+// ── /preview-recipients ────────────────────────────────────────────────────
+// Used by the campaign UI to check how many valid recipients are in a sheet
+app.post('/preview-recipients', async (req, res) => {
+  try {
+    const { sheetUrl, sheetRange } = req.body;
+
+    const sheetId = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/)?.[1];
+    if (!sheetId) return res.status(400).json({ error: 'Invalid Google Sheet URL.' });
+
+    const recipients = await getEmailList(sheetId, sheetRange || 'Sheet1!A:B');
+    res.json({ count: recipients.length });
+  } catch (err) {
+    console.error('Preview error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── /send-campaign ─────────────────────────────────────────────────────────
+// Reads recipients from a Google Sheet and sends a campaign email to all of them
+app.post('/send-campaign', async (req, res) => {
+  try {
+    const { sheetUrl, sheetRange, subject, htmlTemplate } = req.body;
+
+    if (!sheetUrl || !subject || !htmlTemplate) {
+      return res.status(400).json({ error: 'sheetUrl, subject, and htmlTemplate are required.' });
+    }
+
+    const sheetId = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/)?.[1];
+    if (!sheetId) return res.status(400).json({ error: 'Invalid Google Sheet URL.' });
+
+    const recipients = await getEmailList(sheetId, sheetRange || 'Sheet1!A:B');
+    if (!recipients.length) {
+      return res.status(400).json({ error: 'No valid recipients found in that sheet. Check the URL, tab name, and column range.' });
+    }
+
+    console.log(`Campaign starting: "${subject}" → ${recipients.length} recipients`);
+
+    const { sent, failed } = await sendCampaignEmails(recipients, subject, htmlTemplate);
+
+    console.log(`Campaign done. Sent: ${sent}, Failed: ${failed}`);
+    res.json({ success: true, total: recipients.length, sent, failed });
+  } catch (err) {
+    console.error('Campaign error:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
