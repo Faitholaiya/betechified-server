@@ -167,7 +167,7 @@ app.post('/register', async (req, res) => {
     }
 
     const year = '26';
-    const month = '05';
+    const month = '06';
     const prefix = course + year + month;
 
     // Check if already registered
