@@ -122,16 +122,26 @@ app.post('/verify', upload.array('screenshots', 5), async (req, res) => {
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
+
       let parsed;
-      try {
-        const result = await model.generateContent([
-          GEMINI_PROMPT,
-          { inlineData: { mimeType: file.mimetype || 'image/jpeg', data: file.buffer.toString('base64') } }
-        ]);
-        const text = result.response.text().trim().replace(/```json|```/g, '').trim();
-        parsed = JSON.parse(text);
-      } catch (err) {
-        console.error('Gemini error on screenshot ' + (i + 1) + ':', err.message);
+      let success = false;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const result = await model.generateContent([
+            GEMINI_PROMPT,
+            { inlineData: { mimeType: file.mimetype || 'image/jpeg', data: file.buffer.toString('base64') } }
+          ]);
+          const text = result.response.text().trim().replace(/```json|```/g, '').trim();
+          parsed = JSON.parse(text);
+          success = true;
+          break;
+        } catch (err) {
+          console.error('Gemini attempt ' + attempt + ' failed for screenshot ' + (i + 1) + ':', err.message);
+          await new Promise(r => setTimeout(r, 1000));
+        }
+      }
+
+      if (!success) {
         return res.status(400).json({
           passed: false,
           screenshotIndex: i + 1,
@@ -274,7 +284,6 @@ app.post('/send-bulk', async (req, res) => {
 });
 
 // ── /preview-recipients ────────────────────────────────────────────────────
-// Used by the campaign UI to check how many valid recipients are in a sheet
 app.post('/preview-recipients', async (req, res) => {
   try {
     const { sheetUrl, sheetRange } = req.body;
@@ -291,7 +300,6 @@ app.post('/preview-recipients', async (req, res) => {
 });
 
 // ── /send-campaign ─────────────────────────────────────────────────────────
-// Reads recipients from a Google Sheet and sends a campaign email to all of them
 app.post('/send-campaign', async (req, res) => {
   try {
     const { sheetUrl, sheetRange, subject, htmlTemplate } = req.body;
@@ -328,7 +336,6 @@ app.post('/notify-fixed', async (req, res) => {
   }
 
   try {
-    // Fetch all DA registrants in batches
     let allDA = [];
     let from = 0;
     const PAGE = 1000;
@@ -345,7 +352,6 @@ app.post('/notify-fixed', async (req, res) => {
       from += PAGE;
     }
 
-    // Filter: only DA numbers above 1000
     const toNotify = allDA.filter(r => {
       const numPart = r.unique_number.replace('DA2604', '');
       const num = parseInt(numPart);
