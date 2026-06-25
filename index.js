@@ -413,7 +413,18 @@ setInterval(async () => {
 }, FOUR_DAYS);
 
 // ── Start ──────────────────────────────────────────────────────────────────
-app.get('/', (req, res) => {
+app.get('/check-models', async (req, res) => {
+  try {
+    const response = await fetch(
+      'https://generativelanguage.googleapis.com/v1beta/models?key=' + process.env.GEMINI_API_KEY
+    );
+    const data = await response.json();
+    const names = (data.models || []).map(m => m.name);
+    res.json({ models: names });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});app.get('/', (req, res) => {
   res.send('BeTechified Verification Server is running ✅');
 });
 
