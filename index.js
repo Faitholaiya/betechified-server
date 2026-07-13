@@ -118,30 +118,20 @@ app.post('/verify', upload.array('screenshots', 5), async (req, res) => {
       return res.status(400).json({ passed: false, message: 'Duplicate screenshots detected. Each screenshot must be from a different WhatsApp group.' });
     }
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-
       let parsed;
-      let success = false;
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-          const result = await model.generateContent([
-            GEMINI_PROMPT,
-            { inlineData: { mimeType: file.mimetype || 'image/jpeg', data: file.buffer.toString('base64') } }
-          ]);
-          const text = result.response.text().trim().replace(/```json|```/g, '').trim();
-          parsed = JSON.parse(text);
-          success = true;
-          break;
-        } catch (err) {
-          console.error('Gemini attempt ' + attempt + ' failed for screenshot ' + (i + 1) + ':', err.message);
-          await new Promise(r => setTimeout(r, 1000));
-        }
-      }
-
-      if (!success) {
+      try {
+        const result = await model.generateContent([
+          GEMINI_PROMPT,
+          { inlineData: { mimeType: file.mimetype || 'image/jpeg', data: file.buffer.toString('base64') } }
+        ]);
+        const text = result.response.text().trim().replace(/```json|```/g, '').trim();
+        parsed = JSON.parse(text);
+      } catch (err) {
+        console.error('Gemini error on screenshot ' + (i + 1) + ':', err.message);
         return res.status(400).json({
           passed: false,
           screenshotIndex: i + 1,
@@ -284,6 +274,7 @@ app.post('/send-bulk', async (req, res) => {
 });
 
 // ── /preview-recipients ────────────────────────────────────────────────────
+// Used by the campaign UI to check how many valid recipients are in a sheet
 app.post('/preview-recipients', async (req, res) => {
   try {
     const { sheetUrl, sheetRange } = req.body;
@@ -300,6 +291,7 @@ app.post('/preview-recipients', async (req, res) => {
 });
 
 // ── /send-campaign ─────────────────────────────────────────────────────────
+// Reads recipients from a Google Sheet and sends a campaign email to all of them
 app.post('/send-campaign', async (req, res) => {
   try {
     const { sheetUrl, sheetRange, subject, htmlTemplate } = req.body;
@@ -336,6 +328,7 @@ app.post('/notify-fixed', async (req, res) => {
   }
 
   try {
+    // Fetch all DA registrants in batches
     let allDA = [];
     let from = 0;
     const PAGE = 1000;
@@ -352,6 +345,7 @@ app.post('/notify-fixed', async (req, res) => {
       from += PAGE;
     }
 
+    // Filter: only DA numbers above 1000
     const toNotify = allDA.filter(r => {
       const numPart = r.unique_number.replace('DA2604', '');
       const num = parseInt(numPart);
@@ -401,6 +395,265 @@ app.post('/notify-fixed', async (req, res) => {
   }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// BEGINNER CLASS REGISTRATION (permanent registration page)
+// Uses the beginner_settings, beginner_tracks, and beginner_registrations
+// tables in Supabase. Reuses the existing supabase and ses clients above.
+// Needs ONE new environment variable on Render: ADMIN_KEY
+// ═══════════════════════════════════════════════════════════════════════════
+
+const formatRegNumber = (id) => 'BT-' + String(id).padStart(4, '0');
+
+function buildWelcomeHtml({ firstName, regNumber, trackName, cohortName, whatsappLink }) {
+  return `
+<!DOCTYPE html>
+<html>
+<body style="margin:0; padding:0; background:#FAFAFA; font-family:Arial, Helvetica, sans-serif; color:#111111;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#FAFAFA; padding:32px 0;">
+    <tr><td align="center">
+      <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="background:#FFFFFF; border:1px solid #E6E6E6; border-top:4px solid #D40000; max-width:560px; width:100%;">
+        <tr><td style="padding:32px 32px 0;">
+          <p style="font-size:20px; font-weight:bold; margin:0 0 24px;">Be<span style="color:#D40000;">Techified</span></p>
+          <h1 style="font-size:24px; margin:0 0 12px;">You are in, ${firstName}.</h1>
+          <p style="font-size:15px; line-height:1.6; color:#444444; margin:0 0 24px;">
+            Your registration for the BeTechified Beginner Class is confirmed. Here are your details:
+          </p>
+        </td></tr>
+        <tr><td style="padding:0 32px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #E6E6E6;">
+            <tr>
+              <td style="padding:12px 16px; font-size:14px; color:#6B6B6B; border-bottom:1px solid #E6E6E6;">Registration number</td>
+              <td style="padding:12px 16px; font-size:16px; font-weight:bold; color:#D40000; text-align:right; border-bottom:1px solid #E6E6E6;">${regNumber}</td>
+            </tr>
+            <tr>
+              <td style="padding:12px 16px; font-size:14px; color:#6B6B6B; border-bottom:1px solid #E6E6E6;">Track</td>
+              <td style="padding:12px 16px; font-size:14px; font-weight:bold; text-align:right; border-bottom:1px solid #E6E6E6;">${trackName}</td>
+            </tr>
+            <tr>
+              <td style="padding:12px 16px; font-size:14px; color:#6B6B6B;">Cohort</td>
+              <td style="padding:12px 16px; font-size:14px; font-weight:bold; text-align:right;">${cohortName}</td>
+            </tr>
+          </table>
+        </td></tr>
+        <tr><td style="padding:24px 32px;">
+          <a href="${whatsappLink}" style="display:block; background:#D40000; color:#FFFFFF; text-decoration:none; text-align:center; font-size:15px; font-weight:bold; padding:14px 20px;">Join your class group on WhatsApp</a>
+          <p style="font-size:13px; line-height:1.6; color:#6B6B6B; margin:20px 0 0;">
+            Keep this email safe. Your registration number will be requested during the program, and this link gets you back into your class group if you lose it.
+          </p>
+        </td></tr>
+        <tr><td style="padding:20px 32px; border-top:1px solid #E6E6E6;">
+          <p style="font-size:12px; color:#6B6B6B; margin:0;">BeTechified. Learn practical tech skills, free.</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+}
+
+async function sendBeginnerWelcomeEmail({ email, fullName, regNumber, trackName, cohortName, whatsappLink }) {
+  const firstName = fullName.split(' ')[0];
+  try {
+    await ses.send(new SendEmailCommand({
+      Source: 'BeTechified <newsletter@betechified.com>',
+      Destination: { ToAddresses: [email] },
+      Message: {
+        Subject: { Data: `You are in: ${trackName}, ${cohortName} Cohort (${regNumber})` },
+        Body: {
+          Html: { Data: buildWelcomeHtml({ firstName, regNumber, trackName, cohortName, whatsappLink }) },
+          Text: {
+            Data:
+              `You are in, ${firstName}.\n\n` +
+              `Registration number: ${regNumber}\n` +
+              `Track: ${trackName}\n` +
+              `Cohort: ${cohortName}\n\n` +
+              `Join your class group on WhatsApp: ${whatsappLink}\n\n` +
+              `Keep this email safe. Your registration number will be requested during the program.\n\n` +
+              `BeTechified`,
+          },
+        },
+      },
+    }));
+  } catch (err) {
+    console.error('Beginner welcome email failed for', email, err.message);
+  }
+}
+
+// Public: page config. Deliberately does NOT include WhatsApp links.
+app.get('/api/registration/config', async (req, res) => {
+  try {
+    const [{ data: settings, error: sErr }, { data: tracks, error: tErr }] =
+      await Promise.all([
+        supabase.from('beginner_settings').select('cohort_name, registration_open').eq('id', 1).single(),
+        supabase.from('beginner_tracks').select('slug, track_name').eq('active', true).order('sort_order'),
+      ]);
+
+    if (sErr || tErr) throw sErr || tErr;
+
+    res.json({
+      cohortName: settings.cohort_name,
+      registrationOpen: settings.registration_open,
+      tracks,
+    });
+  } catch (err) {
+    console.error('config error:', err);
+    res.status(500).json({ error: 'Could not load registration details. Please refresh the page.' });
+  }
+});
+
+// Public: register. Saves the lead first, then returns the WhatsApp link.
+// link_served records which group each person got, so when a group fills
+// up and the link is swapped mid-cohort, you know who is in which group.
+app.post('/api/registration/register', async (req, res) => {
+  try {
+    const fullName = String(req.body.fullName || '').trim();
+    const email = String(req.body.email || '').trim().toLowerCase();
+    const phone = String(req.body.phone || '').trim();
+    const trackSlug = String(req.body.trackSlug || '').trim();
+
+    if (!fullName || fullName.length < 2) {
+      return res.status(400).json({ error: 'Please enter your full name.' });
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return res.status(400).json({ error: 'Please enter a valid email address.' });
+    }
+    if (!/^\+?[\d\s-]{7,20}$/.test(phone)) {
+      return res.status(400).json({ error: 'Please enter a valid WhatsApp number.' });
+    }
+
+    const [{ data: settings, error: sErr }, { data: track, error: tErr }] =
+      await Promise.all([
+        supabase.from('beginner_settings').select('cohort_name, registration_open').eq('id', 1).single(),
+        supabase.from('beginner_tracks').select('slug, track_name, whatsapp_link, active').eq('slug', trackSlug).single(),
+      ]);
+
+    if (sErr) throw sErr;
+    if (!settings.registration_open) {
+      return res.status(403).json({ error: 'Registration is currently closed. Please check back soon.' });
+    }
+    if (tErr || !track || !track.active) {
+      return res.status(400).json({ error: 'Please select a valid track.' });
+    }
+    if (!track.whatsapp_link) {
+      return res.status(503).json({ error: 'This class group is not open yet. Please try again shortly.' });
+    }
+
+    const { data: inserted, error: iErr } = await supabase
+      .from('beginner_registrations')
+      .insert({
+        full_name: fullName,
+        email,
+        phone,
+        track_slug: track.slug,
+        cohort_name: settings.cohort_name,
+        link_served: track.whatsapp_link,
+      })
+      .select('id')
+      .single();
+
+    // Already registered for this track this cohort: return the link they
+    // were originally served, so group 1 people are not pointed to group 2.
+    if (iErr && iErr.code === '23505') {
+      const { data: existing } = await supabase
+        .from('beginner_registrations')
+        .select('id, link_served')
+        .eq('email', email)
+        .eq('cohort_name', settings.cohort_name)
+        .eq('track_slug', track.slug)
+        .single();
+
+      return res.json({
+        alreadyRegistered: true,
+        registrationNumber: existing ? formatRegNumber(existing.id) : null,
+        trackName: track.track_name,
+        cohortName: settings.cohort_name,
+        whatsappLink: (existing && existing.link_served) || track.whatsapp_link,
+      });
+    }
+    if (iErr) throw iErr;
+
+    const regNumber = formatRegNumber(inserted.id);
+
+    // Send welcome email in the background; do not make the user wait.
+    sendBeginnerWelcomeEmail({
+      email,
+      fullName,
+      regNumber,
+      trackName: track.track_name,
+      cohortName: settings.cohort_name,
+      whatsappLink: track.whatsapp_link,
+    });
+
+    res.json({
+      alreadyRegistered: false,
+      registrationNumber: regNumber,
+      trackName: track.track_name,
+      cohortName: settings.cohort_name,
+      whatsappLink: track.whatsapp_link,
+    });
+  } catch (err) {
+    console.error('register error:', err);
+    res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
+});
+
+// Admin: protected by the x-admin-key header, checked against ADMIN_KEY on Render
+function requireAdmin(req, res, next) {
+  const key = req.get('x-admin-key');
+  if (!process.env.ADMIN_KEY || !key || key !== process.env.ADMIN_KEY) {
+    return res.status(401).json({ error: 'Invalid admin key.' });
+  }
+  next();
+}
+
+app.get('/api/registration/admin/links', requireAdmin, async (req, res) => {
+  try {
+    const [{ data: settings, error: sErr }, { data: tracks, error: tErr }] =
+      await Promise.all([
+        supabase.from('beginner_settings').select('cohort_name, registration_open').eq('id', 1).single(),
+        supabase.from('beginner_tracks').select('slug, track_name, whatsapp_link, active').order('sort_order'),
+      ]);
+    if (sErr || tErr) throw sErr || tErr;
+    res.json({ settings, tracks });
+  } catch (err) {
+    console.error('admin links error:', err);
+    res.status(500).json({ error: 'Could not load links.' });
+  }
+});
+
+app.put('/api/registration/admin/links', requireAdmin, async (req, res) => {
+  try {
+    const { cohortName, registrationOpen, links } = req.body;
+
+    const { error: sErr } = await supabase
+      .from('beginner_settings')
+      .update({
+        cohort_name: String(cohortName || '').trim(),
+        registration_open: Boolean(registrationOpen),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', 1);
+    if (sErr) throw sErr;
+
+    for (const link of links || []) {
+      const { error: lErr } = await supabase
+        .from('beginner_tracks')
+        .update({
+          whatsapp_link: String(link.whatsappLink || '').trim(),
+          active: Boolean(link.active),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('slug', link.slug);
+      if (lErr) throw lErr;
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('admin save error:', err);
+    res.status(500).json({ error: 'Could not save changes.' });
+  }
+});
+
 // ── Keep Supabase alive ────────────────────────────────────────────────────
 const FOUR_DAYS = 4 * 24 * 60 * 60 * 1000;
 setInterval(async () => {
@@ -413,18 +666,7 @@ setInterval(async () => {
 }, FOUR_DAYS);
 
 // ── Start ──────────────────────────────────────────────────────────────────
-app.get('/check-models', async (req, res) => {
-  try {
-    const response = await fetch(
-      'https://generativelanguage.googleapis.com/v1beta/models?key=' + process.env.GEMINI_API_KEY
-    );
-    const data = await response.json();
-    const names = (data.models || []).map(m => m.name);
-    res.json({ models: names });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});app.get('/', (req, res) => {
+app.get('/', (req, res) => {
   res.send('BeTechified Verification Server is running ✅');
 });
 
