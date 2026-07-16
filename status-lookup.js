@@ -175,6 +175,7 @@ function buildResult(cfg, headers, row) {
     label: cfg.label,
     cohort: cell(col.cohort) || null,
     certificate_name: cell(col.certName) || null,
+    submitted: row[0] !== undefined && row[0] !== null ? String(row[0]).trim() : null, // form timestamp (column A)
     status, // 'complete' | 'flexi_partial' | 'awaiting_payment'
     installment_1_paid: inst1,
     installment_2_paid: inst2,
@@ -193,13 +194,17 @@ async function lookup(query) {
     const emailCol = findCol(data.headers, H.email);
     const phoneCol = findCol(data.headers, H.phone);
 
+    const matches = [];
     for (const row of data.rows) {
       const rEmail = emailCol >= 0 ? normalizeEmail(row[emailCol]) : null;
       const rPhone = phoneCol >= 0 ? normalizePhone(row[phoneCol]) : null;
       if ((qEmail && rEmail === qEmail) || (qPhone && rPhone === qPhone)) {
-        results.push(buildResult(cfg, data.headers, row));
+        matches.push(buildResult(cfg, data.headers, row));
       }
     }
+    // Form responses are chronological top-to-bottom; reverse so a returning
+    // student's NEWEST registration (current cohort) appears first.
+    results.push(...matches.reverse());
   }
   return results;
 }
