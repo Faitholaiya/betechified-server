@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Check Your Registration Status | BeTechified</title>
+<meta name="description" content="Confirm your BeTechified certificate or Advanced Class registration and payment status.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Jost:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#131313;
+    --paper:#ffffff;
+    --red:#D40000;
+    --red-deep:#9E0000;
+    --gold:#D4AF37;
+    --muted:#6f6a66;
+    --line:#e8e4e0;
+    --wash:#faf8f6;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    font-family:'Jost',sans-serif;
+    color:var(--ink);
+    background:var(--wash);
+    -webkit-font-smoothing:antialiased;
+    min-height:100vh;
+  }
+  a{color:var(--red-deep)}
+
+  /* ---------- hero ---------- */
+  .hero{
+    background:linear-gradient(135deg,var(--red-deep) 0%,var(--red) 70%);
+    color:#fff;
+    padding:56px 20px 96px;
+    text-align:center;
+  }
+  .hero .brand{
+    font-size:12px;letter-spacing:.22em;text-transform:uppercase;
+    font-weight:600;opacity:.85;margin-bottom:18px;
+  }
+  .hero h1{
+    font-family:'Cormorant Garamond',serif;
+    font-weight:600;
+    font-size:clamp(34px,7vw,48px);
+    line-height:1.1;
+  }
+  .hero p{
+    max-width:420px;margin:14px auto 0;
+    font-size:15.5px;line-height:1.55;opacity:.92;
+  }
+
+  /* ---------- search card ---------- */
+  .wrap{max-width:560px;margin:0 auto;padding:0 16px 72px}
+  .search{
+    background:var(--paper);
+    border:1px solid var(--line);
+    border-radius:14px;
+    box-shadow:0 14px 40px rgba(19,19,19,.08);
+    padding:22px 20px;
+    margin-top:-52px;
+  }
+  .search label{
+    display:block;font-size:12.5px;font-weight:600;
+    letter-spacing:.14em;text-transform:uppercase;color:var(--muted);
+    margin-bottom:9px;
+  }
+  .row{display:flex;gap:10px}
+  .row input{
+    flex:1;min-width:0;
+    font-family:'Jost',sans-serif;font-size:16px;
+    padding:13px 14px;
+    border:1.5px solid var(--line);border-radius:9px;
+    background:var(--wash);color:var(--ink);
+  }
+  .row input:focus{outline:2px solid var(--red);outline-offset:1px;border-color:var(--red)}
+  .row button{
+    font-family:'Jost',sans-serif;font-size:15.5px;font-weight:600;
+    color:#fff;background:var(--red);
+    border:none;border-radius:9px;padding:0 22px;cursor:pointer;
+    transition:background .15s ease;
+  }
+  .row button:hover{background:var(--red-deep)}
+  .row button:focus-visible{outline:3px solid var(--red-deep);outline-offset:2px}
+  .row button[disabled]{opacity:.6;cursor:wait}
+  .hint{font-size:13px;color:var(--muted);margin-top:10px;line-height:1.5}
+
+  /* ---------- results ---------- */
+  #results{margin-top:26px;display:grid;gap:16px}
+  .card{
+    background:var(--paper);
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:22px 20px;
+    border-left:4px solid var(--red);
+    animation:rise .45s ease both;
+  }
+  @keyframes rise{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  @media (prefers-reduced-motion:reduce){.card{animation:none}}
+
+  .card.complete{
+    border-left:none;
+    border-top:4px solid var(--gold);
+  }
+  .card .kicker{
+    font-size:11.5px;font-weight:600;letter-spacing:.18em;
+    text-transform:uppercase;color:var(--muted);
+  }
+  .card h2{
+    font-family:'Cormorant Garamond',serif;
+    font-weight:600;font-size:26px;line-height:1.15;
+    margin:6px 0 2px;
+  }
+  .cohort{font-size:13px;color:var(--muted)}
+
+  .seal{
+    float:right;width:44px;height:44px;border-radius:50%;
+    border:1.5px solid var(--gold);color:var(--gold);
+    display:flex;align-items:center;justify-content:center;
+    font-size:20px;margin-left:12px;
+  }
+
+  /* progress track: structure = information */
+  .track{display:flex;align-items:center;margin:18px 0 6px}
+  .step{display:flex;align-items:center;flex:1;min-width:0}
+  .dot{
+    width:22px;height:22px;border-radius:50%;flex:none;
+    border:2px solid var(--line);background:var(--paper);
+    display:flex;align-items:center;justify-content:center;
+    font-size:12px;color:#fff;
+  }
+  .step.done .dot{background:var(--red);border-color:var(--red)}
+  .card.complete .step.done .dot{background:var(--gold);border-color:var(--gold)}
+  .bar{height:2px;background:var(--line);flex:1;margin:0 6px}
+  .step.done .bar{background:var(--red)}
+  .card.complete .step.done .bar{background:var(--gold)}
+  .labels{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);letter-spacing:.02em}
+  .labels span{flex:1;text-align:center}
+  .labels span:first-child{text-align:left}
+  .labels span:last-child{text-align:right}
+
+  .msg{font-size:15px;line-height:1.6;margin-top:14px}
+  .msg strong{font-weight:600}
+  .certname{
+    margin-top:12px;padding:12px 14px;border-radius:9px;
+    background:var(--wash);border:1px dashed var(--line);
+    font-size:14.5px;line-height:1.5;
+  }
+  .certname b{font-family:'Cormorant Garamond',serif;font-size:19px;font-weight:700}
+  .cta{
+    display:inline-block;margin-top:14px;
+    background:var(--red);color:#fff;text-decoration:none;
+    font-weight:600;font-size:14.5px;
+    padding:11px 18px;border-radius:9px;
+  }
+  .cta:hover{background:var(--red-deep)}
+
+  /* not found / notice */
+  .notice{
+    background:var(--paper);border:1px solid var(--line);border-radius:14px;
+    padding:22px 20px;font-size:15px;line-height:1.65;
+    animation:rise .45s ease both;
+  }
+  .notice h3{
+    font-family:'Cormorant Garamond',serif;font-weight:600;font-size:23px;margin-bottom:8px;
+  }
+  .notice ol{margin:10px 0 0 18px}
+  .notice li{margin-bottom:8px}
+  .error{border-left:4px solid var(--red)}
+
+  footer{
+    text-align:center;font-size:13px;color:var(--muted);
+    padding:0 20px 40px;line-height:1.6;
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="brand">BeTechified</div>
+  <h1>Check your status</h1>
+  <p>Confirm your certificate or Advanced Class registration and payment in one place.</p>
+</div>
+
+<div class="wrap">
+  <div class="search">
+    <label for="q">Email or phone number used on your registration form</label>
+    <div class="row">
+      <input id="q" type="text" inputmode="email" autocomplete="email"
+             placeholder="name@email.com or 0803 000 0000">
+      <button id="go">Check</button>
+    </div>
+    <p class="hint">Use the same details you entered on the registration form after payment.</p>
+  </div>
+
+  <div id="results"></div>
+</div>
+
+<footer>Need help? Email <a href="mailto:admin@betechified.com">admin@betechified.com</a></footer>
+
+<script>
+/* ---------------- CONFIG - edit these two lines ---------------- */
+var API_BASE = 'https://YOUR-RENDER-APP.onrender.com';   // your Render backend
+var FLEXI_BALANCE_URL = 'https://betechified.com/YOUR-FLEXI-BALANCE-PAGE'; // second-installment payment page
+/* ---------------------------------------------------------------- */
+
+var input = document.getElementById('q');
+var btn = document.getElementById('go');
+var out = document.getElementById('results');
+
+btn.addEventListener('click', check);
+input.addEventListener('keydown', function(e){ if(e.key === 'Enter') check(); });
+
+function esc(s){
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
+
+function check(){
+  var q = input.value.trim();
+  if(q.length < 5){
+    out.innerHTML = '<div class="notice error">Enter the email address or phone number you used on your registration form.</div>';
+    return;
+  }
+  btn.disabled = true; btn.textContent = 'Checking...';
+  fetch(API_BASE + '/api/status?q=' + encodeURIComponent(q))
+    .then(function(r){ return r.json().then(function(d){ return {ok:r.ok, d:d}; }); })
+    .then(function(res){
+      if(!res.ok){ showNotice(res.d && res.d.error || 'Something went wrong. Please try again.'); return; }
+      if(!res.d.found){ showNotFound(); return; }
+      render(res.d.results);
+    })
+    .catch(function(){ showNotice('We could not reach the server. Check your connection and try again.'); })
+    .finally(function(){ btn.disabled = false; btn.textContent = 'Check'; });
+}
+
+function showNotice(msg){
+  out.innerHTML = '<div class="notice error">' + esc(msg) + '</div>';
+}
+
+function showNotFound(){
+  out.innerHTML =
+    '<div class="notice">' +
+      '<h3>We could not find your details</h3>' +
+      'Your status appears here only after you complete the registration form. If you have already paid:' +
+      '<ol>' +
+        '<li>Open the email or receipt you received after payment. It contains your registration form link.</li>' +
+        '<li>Fill the form, then check again here. Your status appears within a few minutes.</li>' +
+      '</ol>' +
+      'Filled the form and still not found? Email <a href="mailto:admin@betechified.com">admin@betechified.com</a> ' +
+      'with your name and payment receipt, and the team will sort it out.' +
+    '</div>';
+}
+
+function track(steps){
+  var dots = '', labels = '';
+  for(var i = 0; i < steps.length; i++){
+    var s = steps[i];
+    dots += '<div class="step' + (s.done ? ' done' : '') + '">' +
+              (i > 0 ? '<div class="bar"></div>' : '') +
+              '<div class="dot">' + (s.done ? '&#10003;' : '') + '</div>' +
+            '</div>';
+    labels += '<span>' + esc(s.label) + '</span>';
+  }
+  return '<div class="track">' + dots + '</div><div class="labels">' + labels + '</div>';
+}
+
+function render(results){
+  var html = '';
+  for(var i = 0; i < results.length; i++){
+    var r = results[i];
+    var complete = r.status === 'complete';
+    var flexi = r.plan === 'flexi';
+
+    var steps, msg = '';
+    if(flexi){
+      steps = [
+        {label:'Form', done:true},
+        {label:'Installment 1', done:r.installment_1_paid},
+        {label:'Installment 2', done:r.installment_2_paid}
+      ];
+    } else {
+      steps = [
+        {label:'Form', done:true},
+        {label:'Payment', done:complete},
+        {label:'Complete', done:complete}
+      ];
+    }
+
+    if(complete){
+      msg = '<p class="msg"><strong>You are all set.</strong> Your registration and payment are confirmed.</p>';
+      if(r.certificate_name){
+        msg += '<div class="certname">Your certificate will read<br><b>' + esc(r.certificate_name) + '</b><br>' +
+               '<span style="color:var(--muted);font-size:13px">Spot an error in the spelling? Email ' +
+               '<a href="mailto:admin@betechified.com">admin@betechified.com</a> before certificates are issued.</span></div>';
+      }
+    } else if(r.status === 'flexi_partial'){
+      msg = '<p class="msg"><strong>First installment received.</strong> Your balance of &#8358;25,000 / $25 is due ' +
+            'on or before Week 8. Complete it to secure your certificate and keep full access.</p>' +
+            '<a class="cta" href="' + esc(FLEXI_BALANCE_URL) + '">Pay your balance</a>';
+    } else {
+      msg = '<p class="msg"><strong>Registration received. Payment not yet confirmed.</strong> ' +
+            'Payments can take up to 24 hours to reflect after confirmation. If you paid more than 24 hours ago, ' +
+            'email <a href="mailto:admin@betechified.com">admin@betechified.com</a> with your receipt.</p>';
+    }
+
+    html += '<div class="card' + (complete ? ' complete' : '') + '">' +
+              (complete ? '<div class="seal">&#10003;</div>' : '') +
+              '<div class="kicker">' + esc(r.label) + '</div>' +
+              '<h2>' + (complete ? 'Registration complete' : flexi && r.installment_1_paid ? 'Balance outstanding' : 'Almost there') + '</h2>' +
+              (r.cohort ? '<div class="cohort">Cohort: ' + esc(r.cohort) + '</div>' : '') +
+              track(steps) + msg +
+            '</div>';
+  }
+  out.innerHTML = html;
+}
+</script>
+</body>
+</html>
