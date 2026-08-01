@@ -24,6 +24,11 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+// ── Status check tool (reads the three form-response sheets) ───────────────
+// Powers betechified.com/status. Keep these two lines when editing this file.
+const statusLookup = require('./status-lookup');
+app.use('/api/status', statusLookup);
+
 const GEMINI_PROMPT = `You are a verification assistant for BeTechified, an African tech education platform.
 Check whether this screenshot is a WhatsApp chat that contains a message related to BeTechified (a tech education platform, course, or registration).
 
