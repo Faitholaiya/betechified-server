@@ -24,19 +24,20 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// ── Status check tool (reads the three form-response sheets) ───────────────
-// Powers betechified.com/status. Keep these two lines when editing this file.
-const statusLookup = require('./status-lookup');
-app.use('/api/status', statusLookup);
+const GEMINI_PROMPT = `You are verifying WhatsApp screenshots for BeTechified, an African tech education platform.
 
-const GEMINI_PROMPT = `You are a verification assistant for BeTechified, an African tech education platform.
-Check whether this screenshot is a WhatsApp chat that contains a message related to BeTechified (a tech education platform, course, or registration).
+A screenshot is VALID if it shows:
+- A WhatsApp interface (green header, chat bubbles, or chat list), AND
+- Any BeTechified-related content OR a group chat context where sharing is reasonable
 
-Be LENIENT — if there is reasonable evidence of either a group chat or a BeTechified-related message, pass it.
-Only reject if the screenshot is clearly not WhatsApp at all, or has absolutely no connection to BeTechified.
+A screenshot is INVALID only if:
+- It is clearly not WhatsApp at all, OR
+- It shows no BeTechified connection AND no group chat context
 
-Respond with ONLY valid JSON, no markdown, no explanation:
-{"valid": true} or {"valid": false, "reason": "short reason"}`;
+Be lenient on borderline cases. When uncertain, mark as valid.
+
+Respond with ONLY a JSON object. No markdown, no code fences, no explanation.
+Format: {"valid": true} or {"valid": false, "reason": "brief reason under 10 words"}`;
 
 
 // ── Google Sheets helper ───────────────────────────────────────────────────
@@ -123,7 +124,18 @@ app.post('/verify', upload.array('screenshots', 5), async (req, res) => {
       return res.status(400).json({ passed: false, message: 'Duplicate screenshots detected. Each screenshot must be from a different WhatsApp group.' });
     }
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
+    // Gemini model config:
+    //   temperature: 0        → deterministic (same screenshot always gets same answer, no more flip-flopping)
+    //   maxOutputTokens: 100  → caps output so we never get charged for a runaway response
+    //   responseMimeType JSON → forces clean JSON, no markdown fences
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-2.5-flash-lite',
+      generationConfig: {
+        temperature: 0,
+        maxOutputTokens: 100,
+        responseMimeType: 'application/json'
+      }
+    });
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -172,7 +184,7 @@ app.post('/register', async (req, res) => {
     }
 
     const year = '26';
-    const month = '08';
+    const month = '07';
     const prefix = course + year + month;
 
     // Check if already registered
