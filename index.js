@@ -24,19 +24,26 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-const GEMINI_PROMPT = `You are verifying WhatsApp screenshots for BeTechified, an African tech education platform.
+const GEMINI_PROMPT = `You are verifying WhatsApp screenshots for BeTechified.
 
-A screenshot is VALID if it shows:
-- A WhatsApp interface (green header, chat bubbles, or chat list), AND
-- Any BeTechified-related content OR a group chat context where sharing is reasonable
+Students share this standard message in WhatsApp groups (partial screenshots are common — students may only capture the top, middle, or bottom part):
 
-A screenshot is INVALID only if:
-- It is clearly not WhatsApp at all, OR
-- It shows no BeTechified connection AND no group chat context
+"SCHOLARSHIP ALERT — BeTechified is offering TUITION-FREE training in tech skills: Data Analysis, Product Design, Product Management, Frontend Development, Backend Development, Digital Marketing. Apply now: betechified.com/register"
 
-Be lenient on borderline cases. When uncertain, mark as valid.
+Mark VALID if the screenshot shows a WhatsApp interface AND at least ONE of these is visible:
+- The word "BeTechified" (any case)
+- The URL "betechified.com"
+- The phrase "SCHOLARSHIP ALERT" together with any tech course name
+- The phrase "TUITION-FREE" together with any tech course name
+- At least 3 of the 6 course names above appearing together in one list
 
-Respond with ONLY a JSON object. No markdown, no code fences, no explanation.
+Mark INVALID only if:
+- None of the above signals are visible at all, OR
+- The image is clearly not WhatsApp (not a phone messaging screenshot)
+
+Be generous — screenshots are often small, blurry, dark mode, or cropped. If any BeTechified signal appears clearly, mark VALID even if the rest is hard to read.
+
+Respond with ONLY a JSON object. No markdown, no explanation.
 Format: {"valid": true} or {"valid": false, "reason": "brief reason under 10 words"}`;
 
 
