@@ -24,27 +24,14 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-const GEMINI_PROMPT = `You are verifying WhatsApp screenshots for BeTechified.
+const GEMINI_PROMPT = `You are a verification assistant for BeTechified, an African tech education platform.
+Check whether this screenshot is a WhatsApp chat that contains a message related to BeTechified (a tech education platform, course, or registration).
 
-Students share this standard message in WhatsApp groups (partial screenshots are common — students may only capture the top, middle, or bottom part):
+Be LENIENT — if there is reasonable evidence of either a group chat or a BeTechified-related message, pass it.
+Only reject if the screenshot is clearly not WhatsApp at all, or has absolutely no connection to BeTechified.
 
-"SCHOLARSHIP ALERT — BeTechified is offering TUITION-FREE training in tech skills: Data Analysis, Product Design, Product Management, Frontend Development, Backend Development, Digital Marketing. Apply now: betechified.com/register"
-
-Mark VALID if the screenshot shows a WhatsApp interface AND at least ONE of these is visible:
-- The word "BeTechified" (any case)
-- The URL "betechified.com"
-- The phrase "SCHOLARSHIP ALERT" together with any tech course name
-- The phrase "TUITION-FREE" together with any tech course name
-- At least 3 of the 6 course names above appearing together in one list
-
-Mark INVALID only if:
-- None of the above signals are visible at all, OR
-- The image is clearly not WhatsApp (not a phone messaging screenshot)
-
-Be generous — screenshots are often small, blurry, dark mode, or cropped. If any BeTechified signal appears clearly, mark VALID even if the rest is hard to read.
-
-Respond with ONLY a JSON object. No markdown, no explanation.
-Format: {"valid": true} or {"valid": false, "reason": "brief reason under 10 words"}`;
+Respond with ONLY valid JSON, no markdown, no explanation:
+{"valid": true} or {"valid": false, "reason": "short reason"}`;
 
 
 // ── Google Sheets helper ───────────────────────────────────────────────────
@@ -131,17 +118,10 @@ app.post('/verify', upload.array('screenshots', 5), async (req, res) => {
       return res.status(400).json({ passed: false, message: 'Duplicate screenshots detected. Each screenshot must be from a different WhatsApp group.' });
     }
 
-    // Gemini model config:
-    //   temperature: 0        → deterministic (same screenshot always gets same answer, no more flip-flopping)
-    //   maxOutputTokens: 100  → caps output so we never get charged for a runaway response
-    //   responseMimeType JSON → forces clean JSON, no markdown fences
+    // temperature: 0 makes the model give the same answer for the same screenshot every time (no more flip-flopping)
     const model = genAI.getGenerativeModel({
       model: 'gemini-2.5-flash-lite',
-      generationConfig: {
-        temperature: 0,
-        maxOutputTokens: 100,
-        responseMimeType: 'application/json'
-      }
+      generationConfig: { temperature: 0 }
     });
 
     for (let i = 0; i < files.length; i++) {
