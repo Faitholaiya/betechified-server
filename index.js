@@ -24,6 +24,14 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+// ═══════════════════════════════════════════════════════════════════════════
+// STATUS CHECK TOOL - powers betechified.com/status
+// DO NOT REMOVE these two lines when editing this file. Without them the
+// status page shows "We could not reach the server."
+// ═══════════════════════════════════════════════════════════════════════════
+const statusLookup = require('./status-lookup');
+app.use('/api/status', statusLookup);
+
 const GEMINI_PROMPT = `You are a verification assistant for BeTechified, an African tech education platform.
 Check whether this screenshot is a WhatsApp chat that contains a message related to BeTechified (a tech education platform, course, or registration).
 
