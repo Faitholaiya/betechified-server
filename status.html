@@ -155,6 +155,12 @@
     padding:11px 18px;border-radius:9px;
   }
   .cta:hover{background:var(--red-deep)}
+  .cta-outline{background:transparent;color:var(--red-deep);border:1.5px solid var(--red)}
+  .cta-outline:hover{background:var(--red);color:#fff}
+  .paywall{margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
+  .paylead{font-weight:600;margin-bottom:4px}
+  .payrow{display:flex;gap:10px;flex-wrap:wrap}
+  .payrow .cta{flex:1;min-width:180px;text-align:center;margin-top:10px}
 
   /* not found / notice */
   .notice{
@@ -200,10 +206,11 @@
 <footer>Need help? Email <a href="mailto:admin@betechified.com">admin@betechified.com</a></footer>
 
 <script>
-/* ---------------- CONFIG - edit these two lines ---------------- */
-var API_BASE = 'https://YOUR-RENDER-APP.onrender.com';   // your Render backend
-var FLEXI_BALANCE_URL = 'https://betechified.com/YOUR-FLEXI-BALANCE-PAGE'; // second-installment payment page
-/* ---------------------------------------------------------------- */
+/* ---------------- CONFIG - edit API_BASE, confirm the two links ---------------- */
+var API_BASE = 'https://betechified-server.onrender.com';   // your Render backend
+var CERT_PAY_URL = 'https://betechified.com/certjuly';            // certificate payment page - UPDATE EACH COHORT
+var ADVANCED_PAY_URL = 'https://betechified.com/advanced-class';  // Advanced Class payment page (constant)
+/* -------------------------------------------------------------------------------- */
 
 var input = document.getElementById('q');
 var btn = document.getElementById('go');
@@ -251,6 +258,13 @@ function showNotFound(){
       '</ol>' +
       'Filled the form and still not found? Email <a href="mailto:admin@betechified.com">admin@betechified.com</a> ' +
       'with your name and payment receipt, and the team will sort it out.' +
+      '<div class="paywall">' +
+        '<p class="paylead">Have not paid yet? Secure your spot now:</p>' +
+        '<div class="payrow">' +
+          '<a class="cta" href="' + esc(CERT_PAY_URL) + '">Get your certificate</a>' +
+          '<a class="cta cta-outline" href="' + esc(ADVANCED_PAY_URL) + '">Join the Advanced Class</a>' +
+        '</div>' +
+      '</div>' +
     '</div>';
 }
 
@@ -297,9 +311,9 @@ function render(results){
                '<a href="mailto:admin@betechified.com">admin@betechified.com</a> before certificates are issued.</span></div>';
       }
     } else if(r.status === 'flexi_partial'){
-      msg = '<p class="msg"><strong>First installment received.</strong> Your balance of &#8358;25,000 / $25 is due ' +
-            'on or before Week 8. Complete it to secure your certificate and keep full access.</p>' +
-            '<a class="cta" href="' + esc(FLEXI_BALANCE_URL) + '">Pay your balance</a>';
+      msg = '<p class="msg"><strong>First installment received.</strong> You are on the Flexi plan: ' +
+            'your balance of &#8358;25,000 / $25 is due on or before Week 8. ' +
+            'Complete it to secure your certificate and keep full access.</p>';
     } else {
       msg = '<p class="msg"><strong>Registration received. Payment not yet confirmed.</strong> ' +
             'Payments can take up to 24 hours to reflect after confirmation. If you paid more than 24 hours ago, ' +
@@ -310,7 +324,10 @@ function render(results){
               (complete ? '<div class="seal">&#10003;</div>' : '') +
               '<div class="kicker">' + esc(r.label) + '</div>' +
               '<h2>' + (complete ? 'Registration complete' : flexi && r.installment_1_paid ? 'Balance outstanding' : 'Almost there') + '</h2>' +
-              (r.cohort ? '<div class="cohort">Cohort: ' + esc(r.cohort) + '</div>' : '') +
+              '<div class="cohort">' +
+                (r.cohort ? 'Cohort: ' + esc(r.cohort) + (r.submitted ? ' &middot; ' : '') : '') +
+                (r.submitted ? 'Registered: ' + esc(r.submitted) : '') +
+              '</div>' +
               track(steps) + msg +
             '</div>';
   }
