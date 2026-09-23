@@ -24,6 +24,14 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+// ═══════════════════════════════════════════════════════════════════════════
+// STATUS CHECK TOOL - powers betechified.com/status
+// DO NOT REMOVE these two lines when editing this file. Without them the
+// status page shows "We could not reach the server."
+// ═══════════════════════════════════════════════════════════════════════════
+const statusLookup = require('./status-lookup');
+app.use('/api/status', statusLookup);
+
 const GEMINI_PROMPT = `You are a verification assistant for BeTechified, an African tech education platform.
 Check whether this screenshot is a WhatsApp chat that contains a message related to BeTechified (a tech education platform, course, or registration).
 
@@ -118,7 +126,11 @@ app.post('/verify', upload.array('screenshots', 5), async (req, res) => {
       return res.status(400).json({ passed: false, message: 'Duplicate screenshots detected. Each screenshot must be from a different WhatsApp group.' });
     }
 
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
+    // temperature: 0 makes the model give the same answer for the same screenshot every time (no more flip-flopping)
+    const model = genAI.getGenerativeModel({
+      model: 'gemini-2.5-flash-lite',
+      generationConfig: { temperature: 0 }
+    });
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -167,7 +179,7 @@ app.post('/register', async (req, res) => {
     }
 
     const year = '26';
-    const month = '07';
+    const month = '10';
     const prefix = course + year + month;
 
     // Check if already registered
@@ -223,7 +235,7 @@ app.post('/register', async (req, res) => {
           Subject: { Data: 'Your BeTechified Unique Number - ' + generatedNumber },
           Body: {
             Html: {
-              Data: '<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:32px;"><h2 style="color:#D40000;">You\'re verified! 🎉</h2><p>Hi ' + name + ',</p><p>Your unique number for the <strong>' + course + '</strong> track is:</p><div style="background:#f5f5f5;border-left:4px solid #D40000;padding:16px 24px;margin:24px 0;font-size:28px;font-weight:bold;letter-spacing:4px;">' + generatedNumber + '</div><p>Use this number to submit your assignments and access the full beginner class.</p><p>Welcome to BeTechified! 🚀</p><hr style="margin:32px 0;border:none;border-top:1px solid #eee;" /><p style="color:#888;font-size:12px;">BeTechified — Tech Education for Africa</p></div>'
+              Data: '<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:32px;"><h2 style="color:#D40000;">You\'re verified! 🎉</h2><p>Hi ' + name + ',</p><p>Your unique number for the <strong>' + course + '</strong> track is:</p><div style="background:#f5f5f5;border-left:4px solid #D40000;padding:16px 24px;margin:24px 0;font-size:28px;font-weight:bold;letter-spacing:4px;">' + generatedNumber + '</div><p>Use this number to submit your assignments when classes start.</p><p>Don\'t miss the Onboarding Session — it\'s where you\'ll get everything you need to hit the ground running. Keep an eye on the learning group on WhatsApp for the schedule and link.</p><p>Welcome to BeTechified! 🚀</p><hr style="margin:32px 0;border:none;border-top:1px solid #eee;" /><p style="text-align:center;margin:0 0 16px 0;"><a href="https://www.instagram.com/betechified" style="color:#888;text-decoration:none;margin:0 8px;font-size:12px;">Instagram</a>|<a href="https://x.com/betechified" style="color:#888;text-decoration:none;margin:0 8px;font-size:12px;">X</a>|<a href="https://www.facebook.com/profile.php?id=61555470444491" style="color:#888;text-decoration:none;margin:0 8px;font-size:12px;">Facebook</a>|<a href="https://www.linkedin.com/company/betechified/" style="color:#888;text-decoration:none;margin:0 8px;font-size:12px;">LinkedIn</a>|<a href="https://youtube.com/@be_techified" style="color:#888;text-decoration:none;margin:0 8px;font-size:12px;">YouTube</a>|<a href="https://www.tiktok.com/@betechified" style="color:#888;text-decoration:none;margin:0 8px;font-size:12px;">TikTok</a></p><p style="color:#888;font-size:12px;text-align:center;">BeTechified — Tech Education for Africa</p></div>'
             }
           }
         }
