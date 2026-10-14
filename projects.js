@@ -115,6 +115,8 @@ const publicView = p => Object.fromEntries(PUBLIC_FIELDS.map(k => [k, p[k]]));
 
 /* ---------- Grouping sheet ---------- */
 const norm = v => String(v || '').toUpperCase().replace(/\s+/g, '');
+// "group 1", "GROUP 1 ", "Group1" all become "Group 1"; "group 1a" becomes "Group 1A"
+const unitName = v => { const t = String(v || '').trim().replace(/\s+/g, ' '); const m = t.match(/^group\s*(\d+)\s*([a-z]?)$/i); return m ? `Group ${m[1]}${m[2].toUpperCase()}` : t; };
 const normEmail = v => String(v || '').trim().toLowerCase();
 
 function colIndex(headers) {
@@ -134,20 +136,30 @@ async function loadGroups(p) {
   return cached(`groups:${p.track}:${p.cohort}`, 5 * 60e3, async () => {
     const rows = await readRows(p.groupingSheetId, p.groupingTab);
     const c = colIndex(rows[0] || []);
+    if (c.email < 0) { // header missing: find the column that holds email addresses
+      const body = rows.slice(1, 100);
+      const n = Math.max(...rows.slice(0, 100).map(r => r.length), 0);
+      for (let i = 0; i < n; i++) if (body.filter(r => /@/.test(String(r[i] || ''))).length >= Math.max(1, body.filter(r => r[c.name]).length / 2)) { c.email = i; break; }
+    }
     if (c.group < 0 || c.name < 0) throw new Error('Grouping sheet needs "Group" and "Member name" columns');
-    const unitCol = p.projectUnit === 'subgroup' && c.subgroup >= 0 ? c.subgroup : c.group;
     const units = new Map(); const byNumber = new Map(); const byEmail = new Map();
     const issues = { missingNumber: [], duplicateNumber: [], nameInTwoGroups: [], otherTrackPrefix: [], oddFormat: [] };
     const seenName = new Map();
+    let lastGroup = '', lastSub = '';
     rows.slice(1).forEach((r, i) => {
-      const unit = String(r[unitCol] || '').trim(); const name = String(r[c.name] || '').trim();
+      // if Group or Sub-group is only filled on a group's first row, carry it down
+      const gRaw = String(r[c.group] || '').trim(); const sRaw = c.subgroup >= 0 ? String(r[c.subgroup] || '').trim() : '';
+      if (gRaw) { lastGroup = unitName(gRaw); if (!sRaw) lastSub = ''; }
+      if (sRaw) lastSub = unitName(sRaw);
+      const unit = p.projectUnit === 'subgroup' && c.subgroup >= 0 ? lastSub : lastGroup;
+      const name = String(r[c.name] || '').trim();
       if (!unit || !name) return;
-      if (!units.has(unit)) units.set(unit, { unit, group: String(r[c.group] || '').trim(), whatsapp: '', members: [] });
+      if (!units.has(unit)) units.set(unit, { unit, group: lastGroup, whatsapp: '', members: [] });
       const u = units.get(unit);
       const wa = c.whatsapp >= 0 ? String(r[c.whatsapp] || '').trim() : '';
       if (wa && !u.whatsapp) u.whatsapp = wa.replace(/\\&/g, '&');
       const number = norm(r[c.number]); const email = normEmail(r[c.email]);
-      const subgroup = c.subgroup >= 0 ? String(r[c.subgroup] || '').trim() : '';
+      const subgroup = lastSub;
       const m = { name, number, email, subgroup, row: i + 2 };
       u.members.push(m);
       if (!number) issues.missingNumber.push(`${name} (row ${m.row})`);
@@ -187,7 +199,7 @@ async function loadSubmissions(p) {
     const ni = h.findIndex((x, i) => x.includes('name') && i !== gi && share(i, v => /^https?:\/\//i.test(v)) < 0.5);
     const map = new Map();
     rows.slice(1).forEach(r => {
-      const unit = String(r[gi] || '').trim(); if (!unit) return;
+      const unit = unitName(r[gi]); if (!unit) return;
       const t = Number(r[ts]);
       if (from && !(t >= from)) return; // earlier cohort's submission, ignore
       if (!map.has(unit)) map.set(unit, []);
@@ -286,7 +298,7 @@ router.post('/notify', async (req, res) => {
     if (!real.length || secret.length !== real.length || !crypto.timingSafeEqual(secret, real)) return res.status(401).json({ error: 'Wrong secret' });
     const p = await findProject(String(b.track || ''), b.cohort ? String(b.cohort) : null);
     if (!p) return res.status(404).json({ check: 'No project set up for this track' });
-    const unit = String(b.group || '').trim();
+    const unit = unitName(b.group);
     cache.delete(`subs:${p.track}:${p.cohort}`); // new submission shows on the page straight away
     const data = await loadGroups(p);
     const u = data.units.get(unit);
