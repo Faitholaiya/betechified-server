@@ -42,11 +42,14 @@ async function firstTab(id) {
   const r = await sheets.spreadsheets.get({ spreadsheetId: id, fields: 'sheets.properties.title' });
   return r.data.sheets[0].properties.title;
 }
-async function readRows(id, tab) {
+async function readRows(id, tab, opts = {}) {
   const t = tab || await firstTab(id);
-  const r = await sheets.spreadsheets.values.get({ spreadsheetId: id, range: `'${t}'` });
+  const r = await sheets.spreadsheets.values.get({ spreadsheetId: id, range: `'${t}'`, ...opts });
   return r.data.values || [];
 }
+// Sheets date serial (days since 30 Dec 1899, in the sheet's own time zone)
+const serialToText = n => new Date(Math.round((n - 25569) * 864e5)).toLocaleString('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true });
+const dateToSerial = ymd => { const [y, m, d] = String(ymd).split('-').map(Number); return Date.UTC(y, m - 1, d) / 864e5 + 25569; };
 
 /* ---------- Small cache ---------- */
 const cache = new Map();
@@ -168,7 +171,9 @@ async function loadGroups(p) {
 async function loadSubmissions(p) {
   if (!p.responsesSheetId) return new Map();
   return cached(`subs:${p.track}:${p.cohort}`, 60e3, async () => {
-    const rows = await readRows(p.responsesSheetId, p.responsesTab);
+    // read raw values so timestamps come back as date serials we can filter on
+    const rows = await readRows(p.responsesSheetId, p.responsesTab, { valueRenderOption: 'UNFORMATTED_VALUE', dateTimeRenderOption: 'SERIAL_NUMBER' });
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(p.submissionsFrom || '') ? dateToSerial(p.submissionsFrom) : 0;
     const h = (rows[0] || []).map(x => String(x || '').toLowerCase());
     const ts = h.findIndex(x => x.includes('timestamp'));
     const unitHeader = p.projectUnit === 'subgroup' ? (x => x.includes('sub')) : (x => x.includes('group') && !x.includes('sub'));
@@ -177,8 +182,10 @@ async function loadSubmissions(p) {
     const map = new Map();
     rows.slice(1).forEach(r => {
       const unit = String(r[gi] || '').trim(); if (!unit) return;
+      const t = Number(r[ts]);
+      if (from && !(t >= from)) return; // earlier cohort's submission, ignore
       if (!map.has(unit)) map.set(unit, []);
-      map.get(unit).push({ name: String(r[ni] || '').trim() || 'A group member', at: String(r[ts] || '') });
+      map.get(unit).push({ name: String(r[ni] || '').trim() || 'A group member', at: t ? serialToText(t) : '' });
     });
     return map;
   });

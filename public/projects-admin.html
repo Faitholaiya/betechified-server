@@ -92,6 +92,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,te
       <p class="help">Must be a Google Sheet, not an uploaded Excel file. Columns used: Group, Sub-group, Member name, WhatsApp link, Unique Number, Email Address.</p>
       <label for="f_responses">Form responses sheet link</label><input id="f_responses" placeholder="https://docs.google.com/spreadsheets/d/...">
       <p class="help">The sheet linked to the submission form. Used to show each group whether they have submitted.</p>
+      <label for="f_from">Count submissions made on or after</label><input id="f_from" type="date" style="max-width:260px">
+      <p class="help">The responses sheet is reused every cohort, so set this to the day this cohort's project starts. Older submissions are ignored.</p>
       <div class="grid">
         <div><label for="f_unit">Who submits one project</label><select id="f_unit"><option value="group">Each group (Group 1, Group 2)</option><option value="subgroup">Each sub-group (Group 1A, Group 1B)</option></select></div>
         <div><label for="f_prefix">Unique number prefix for this track</label><input id="f_prefix" placeholder="PD"><p class="help">Used only to flag numbers from other tracks in the check.</p></div>
@@ -192,7 +194,7 @@ $('list').onclick = e => {
   const ed = e.target.dataset.edit, dup = e.target.dataset.dup;
   if (ed !== undefined) openEditor(PROJECTS[ed], 'Edit project');
   if (dup !== undefined) {
-    const p = { ...PROJECTS[dup], cohort: '', groupingSheetId: '', responsesSheetId: '', deadline: '', presentationDate: '', active: true };
+    const p = { ...PROJECTS[dup], cohort: '', groupingSheetId: '', deadline: '', presentationDate: '', submissionsFrom: '', active: true };
     openEditor(p, 'New cohort (copied content, add the new sheets and dates)');
   }
 };
@@ -212,7 +214,7 @@ function openEditor(p, title) {
   const set = (id, v) => $(id).value = v ?? '';
   set('f_track', p.track || 'pd'); set('f_cohort', p.cohort); set('f_trackName', p.trackName); set('f_active', String(p.active !== false));
   set('f_grouping', sheetUrl(p.groupingSheetId)); set('f_responses', sheetUrl(p.responsesSheetId));
-  set('f_unit', p.projectUnit || 'group'); set('f_prefix', p.numberPrefix || (p.track || 'pd').toUpperCase());
+  set('f_unit', p.projectUnit || 'group'); set('f_from', p.submissionsFrom); set('f_prefix', p.numberPrefix || (p.track || 'pd').toUpperCase());
   set('f_prefill', p.formPrefillBase ? p.formPrefillBase + '?usp=pp_url' : ''); set('f_eGroup', f.group); set('f_eName', f.name); set('f_eNumber', f.number); set('f_short', p.formShortUrl);
   set('f_deadline', lagosLocal(p.deadline)); set('f_presentation', p.presentationDate);
   set('f_title', p.title); set('f_aim', p.aim); set('f_brief', p.brief); set('f_site', p.siteUrl); set('f_siteLabel', p.siteLabel);
@@ -249,7 +251,7 @@ function collect() {
     track: $('f_track').value, cohort: $('f_cohort').value.trim().toLowerCase(), trackName: $('f_trackName').value.trim(),
     active: $('f_active').value === 'true',
     groupingSheetId: sheetId($('f_grouping').value), responsesSheetId: $('f_responses').value.trim() ? sheetId($('f_responses').value) : '',
-    projectUnit: $('f_unit').value, numberPrefix: $('f_prefix').value.trim().toUpperCase(),
+    projectUnit: $('f_unit').value, submissionsFrom: $('f_from').value, numberPrefix: $('f_prefix').value.trim().toUpperCase(),
     formPrefillBase: prefill ? prefill.split('?')[0] : '',
     formFields: { group: $('f_eGroup').value.trim(), name: $('f_eName').value.trim(), number: $('f_eNumber').value.trim() },
     formShortUrl: $('f_short').value.trim(),
@@ -290,6 +292,7 @@ $('editor').onsubmit = async e => {
   const missing = [];
   if (!p.cohort) missing.push('cohort code'); if (!p.groupingSheetId) missing.push('grouping sheet');
   if (!p.deadline) missing.push('deadline'); if (!p.title) missing.push('project title');
+  if (p.responsesSheetId && !p.submissionsFrom) missing.push('"count submissions from" date');
   if (!p.formPrefillBase && !p.formShortUrl) missing.push('submission form link');
   if (missing.length) return note('saveMsg', 'err', `Add the ${missing.join(', ')} before saving.`);
   $('saveBtn').disabled = true;
