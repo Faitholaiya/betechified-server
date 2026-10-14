@@ -176,9 +176,15 @@ async function loadSubmissions(p) {
     const from = /^\d{4}-\d{2}-\d{2}$/.test(p.submissionsFrom || '') ? dateToSerial(p.submissionsFrom) : 0;
     const h = (rows[0] || []).map(x => String(x || '').toLowerCase());
     const ts = h.findIndex(x => x.includes('timestamp'));
-    const unitHeader = p.projectUnit === 'subgroup' ? (x => x.includes('sub')) : (x => x.includes('group') && !x.includes('sub'));
-    const gi = h.findIndex(unitHeader);
-    const ni = h.findIndex(x => x.includes('name'));
+    // pick columns by their contents: the group column holds values like "Group 1",
+    // the name column has "name" in its title and holds text, not links
+    const body = rows.slice(1, 200);
+    const share = (i, test) => { const v = body.map(r => String(r[i] ?? '').trim()).filter(Boolean); return v.length ? v.filter(test).length / v.length : 0; };
+    const isUnit = p.projectUnit === 'subgroup' ? (v => /^group\s*\d+\s*[a-z]$/i.test(v)) : (v => /^group\s*\d+$/i.test(v));
+    let gi = -1, best = 0;
+    h.forEach((x, i) => { const sc = share(i, isUnit) + (x.includes('group') ? 0.01 : 0); if (sc > best) { best = sc; gi = i; } });
+    if (best < 0.5) gi = h.findIndex(x => x === 'group' || x.startsWith('group'));
+    const ni = h.findIndex((x, i) => x.includes('name') && i !== gi && share(i, v => /^https?:\/\//i.test(v)) < 0.5);
     const map = new Map();
     rows.slice(1).forEach(r => {
       const unit = String(r[gi] || '').trim(); if (!unit) return;
