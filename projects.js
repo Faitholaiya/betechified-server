@@ -116,9 +116,18 @@ const publicView = p => Object.fromEntries(PUBLIC_FIELDS.map(k => [k, p[k]]));
 /* ---------- Grouping sheet ---------- */
 const norm = v => String(v || '').toUpperCase().replace(/\s+/g, '');
 // "26100223.0" or "26100223" become "FD26100223" when the track prefix is known
-const normNum = (v, prefix) => { let n = norm(v).replace(/\.0+$/, ''); if (prefix && /^\d{8}$/.test(n)) n = prefix + n; return n; };
+const normNum = (v, prefix) => { let n = norm(v).replace(/[.,;]+$/, '').replace(/\.0+$/, ''); if (prefix && /^\d{8}$/.test(n)) n = prefix + n; return n; };
 // "group 1", "GROUP 1 ", "Group1" all become "Group 1"; "group 1a" becomes "Group 1A"
-const unitName = v => { const t = String(v || '').trim().replace(/\s+/g, ' '); const m = t.match(/^group\s*(\d+)\s*([a-z]?)$/i); return m ? `Group ${m[1]}${m[2].toUpperCase()}` : t; };
+const WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
+const unitName = v => {
+  const t = String(v || '').trim().replace(/\s+/g, ' ');
+  let x = t.toLowerCase().replace(/[().,:#]/g, ' ').replace(/\b(group|grp|number|no)\b/g, ' ').replace(/\s+/g, ' ').trim();
+  x = x.replace(/^([a-z]+)\b/, w => WORDS[w] ? String(WORDS[w]) : w);
+  const m = x.match(/^(\d{1,2})\s*([a-c])?(\s|$)/);
+  return m ? `Group ${parseInt(m[1], 10)}${m[2] ? m[2].toUpperCase() : ''}` : t;
+};
+// a sub-group answer like "Group 6A" still counts for "Group 6" when each group submits
+const groupOnly = u => u.replace(/^(Group \d+)[A-Z]$/, '$1');
 const normEmail = v => String(v || '').trim().toLowerCase();
 
 function colIndex(headers) {
@@ -196,16 +205,21 @@ async function loadSubmissions(p) {
     const share = (i, test) => { const v = body.map(r => String(r[i] ?? '').trim()).filter(Boolean); return v.length ? v.filter(test).length / v.length : 0; };
     const isUnit = p.projectUnit === 'subgroup' ? (v => /^group\s*\d+\s*[a-z]$/i.test(v)) : (v => /^group\s*\d+$/i.test(v));
     let gi = -1, best = 0;
-    h.forEach((x, i) => { const sc = share(i, isUnit) + (x.includes('group') ? 0.01 : 0); if (sc > best) { best = sc; gi = i; } });
-    if (best < 0.5) gi = h.findIndex(x => x === 'group' || x.startsWith('group'));
-    const ni = h.findIndex((x, i) => x.includes('name') && i !== gi && share(i, v => /^https?:\/\//i.test(v)) < 0.5);
+    h.forEach((x, i) => { const sc = share(i, v => /^Group \d+/.test(unitName(v))) + (x.includes('group') ? 0.01 : 0); if (sc > best) { best = sc; gi = i; } });
+    if (best < 0.3) gi = h.findIndex(x => x === 'group' || x.startsWith('group'));
+    // the submitter's name: skip "Product Name", "Project Name", file or business names, and link columns
+    const nameOk = (x, i) => x.includes('name') && i !== gi && !/product|project|file|business|brand|app|solution|team/.test(x) && share(i, v => /^https?:\/\//i.test(v)) < 0.5;
+    let ni = h.findIndex((x, i) => nameOk(x, i) && /^(full |your |)name$|full name|your name|leader|submitter|submitted by/.test(x));
+    if (ni < 0) ni = h.findIndex(nameOk);
+    const ei = h.findIndex(x => x.includes('email'));
     const map = new Map();
     rows.slice(1).forEach(r => {
-      const unit = unitName(r[gi]); if (!unit) return;
+      let unit = unitName(r[gi]); if (!unit) return;
+      if (p.projectUnit !== 'subgroup') unit = groupOnly(unit);
       const t = Number(r[ts]);
       if (from && !(t >= from)) return; // earlier cohort's submission, ignore
       if (!map.has(unit)) map.set(unit, []);
-      map.get(unit).push({ name: String(r[ni] || '').trim() || 'A group member', at: t ? serialToText(t) : '' });
+      map.get(unit).push({ name: ni >= 0 ? String(r[ni] || '').trim() : '', email: ei >= 0 ? normEmail(r[ei]) : '', at: t ? serialToText(t) : '' });
     });
     return map;
   });
@@ -249,7 +263,7 @@ router.get('/lookup', async (req, res) => {
       you: hit.m.name,
       whatsapp: u.whatsapp,
       members: u.members.map((m, i) => ({ name: m.name, subgroup: m.subgroup, isYou: m === hit.m, suggestedLeader: i === 0 })),
-      submissions: subs
+      submissions: subs.map(x => ({ name: x.name || (data.byEmail.get(x.email) || {}).m?.name || 'A group member', at: x.at }))
     });
   } catch (e) { console.error(e); res.status(500).json({ error: 'Lookup failed' }); }
 });
@@ -300,7 +314,7 @@ router.post('/notify', async (req, res) => {
     if (!real.length || secret.length !== real.length || !crypto.timingSafeEqual(secret, real)) return res.status(401).json({ error: 'Wrong secret' });
     const p = await findProject(String(b.track || ''), b.cohort ? String(b.cohort) : null);
     if (!p) return res.status(404).json({ check: 'No project set up for this track' });
-    const unit = unitName(b.group);
+    const unit = p.projectUnit === 'subgroup' ? unitName(b.group) : groupOnly(unitName(b.group));
     cache.delete(`subs:${p.track}:${p.cohort}`); // new submission shows on the page straight away
     const data = await loadGroups(p);
     const u = data.units.get(unit);
