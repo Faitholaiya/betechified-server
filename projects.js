@@ -1,433 +1,338 @@
-const { SESClient, SendEmailCommand } = require('@aws-sdk/client-ses');
+/*
+ * BeTechified track projects module
+ * Mount in your existing Render server:
+ *   app.set('trust proxy', 1);
+ *   app.use('/api/projects', require('./projects'));
+ *
+ * Env vars:
+ *   GOOGLE_SERVICE_ACCOUNT_JSON  service account key JSON (same one the status page uses)
+ *   PROJECTS_CONFIG_SHEET_ID     Google Sheet that stores project settings (service account = Editor)
+ *   PROJECTS_ADMIN_KEY           key for the admin page
+ *   PROJECTS_ALLOWED_ORIGINS     optional, comma separated, e.g. https://betechified.com
+ */
 const express = require('express');
-const cors = require('cors');
-const multer = require('multer');
-const { createClient } = require('@supabase/supabase-js');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
-const { google } = require('googleapis'); // npm install googleapis
+const crypto = require('crypto');
+const path = require('path');
+const { google } = require('googleapis');
 
-const app = express();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const router = express.Router();
+router.use(express.json({ limit: '200kb' }));
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+/* ---------- CORS ---------- */
+const ORIGINS = (process.env.PROJECTS_ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+router.use((req, res, next) => {
+  const o = req.headers.origin;
+  if (!ORIGINS.length || (o && ORIGINS.includes(o))) res.setHeader('Access-Control-Allow-Origin', ORIGINS.length ? o : '*');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Admin-Key');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+/* ---------- Google Sheets client ---------- */
+const auth = new google.auth.GoogleAuth({
+  credentials: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '{}'),
+  scopes: ['https://www.googleapis.com/auth/spreadsheets']
+});
+const sheets = google.sheets({ version: 'v4', auth });
+const CONFIG_SHEET = process.env.PROJECTS_CONFIG_SHEET_ID;
+const CONFIG_TAB = 'projects';
+
+async function firstTab(id) {
+  const r = await sheets.spreadsheets.get({ spreadsheetId: id, fields: 'sheets.properties.title' });
+  return r.data.sheets[0].properties.title;
+}
+async function readRows(id, tab) {
+  const t = tab || await firstTab(id);
+  const r = await sheets.spreadsheets.values.get({ spreadsheetId: id, range: `'${t}'` });
+  return r.data.values || [];
+}
+
+/* ---------- Small cache ---------- */
+const cache = new Map();
+async function cached(key, ttlMs, fn) {
+  const hit = cache.get(key);
+  if (hit && hit.exp > Date.now()) return hit.val;
+  const val = await fn();
+  cache.set(key, { val, exp: Date.now() + ttlMs });
+  return val;
+}
+const clearCache = () => cache.clear();
+
+/* ---------- Project settings (stored in config sheet) ----------
+ * Tab "projects", columns: key | updated_at | json
+ * key = track:cohort, e.g. pd:oct26
+ */
+async function ensureConfigTab() {
+  const r = await sheets.spreadsheets.get({ spreadsheetId: CONFIG_SHEET, fields: 'sheets.properties.title' });
+  if (!r.data.sheets.some(s => s.properties.title === CONFIG_TAB)) {
+    await sheets.spreadsheets.batchUpdate({ spreadsheetId: CONFIG_SHEET, requestBody: { requests: [{ addSheet: { properties: { title: CONFIG_TAB } } }] } });
+    await sheets.spreadsheets.values.update({ spreadsheetId: CONFIG_SHEET, range: `${CONFIG_TAB}!A1:C1`, valueInputOption: 'RAW', requestBody: { values: [['key', 'updated_at', 'json']] } });
+  }
+}
+async function loadProjects() {
+  return cached('projects', 60e3, async () => {
+    await ensureConfigTab();
+    const rows = await readRows(CONFIG_SHEET, CONFIG_TAB);
+    const out = [];
+    rows.slice(1).forEach((r, i) => {
+      try { if (r[0]) out.push({ ...JSON.parse(r[2]), _row: i + 2, _updated: r[1] }); } catch (e) { /* skip broken row */ }
+    });
+    return out;
+  });
+}
+async function saveProject(p) {
+  const key = `${p.track}:${p.cohort}`;
+  const clean = { ...p }; delete clean._row; delete clean._updated;
+  const all = await loadProjects();
+  const existing = all.find(x => `${x.track}:${x.cohort}` === key);
+  const values = [[key, new Date().toISOString(), JSON.stringify(clean)]];
+  if (existing) {
+    await sheets.spreadsheets.values.update({ spreadsheetId: CONFIG_SHEET, range: `${CONFIG_TAB}!A${existing._row}:C${existing._row}`, valueInputOption: 'RAW', requestBody: { values } });
+  } else {
+    await sheets.spreadsheets.values.append({ spreadsheetId: CONFIG_SHEET, range: `${CONFIG_TAB}!A:C`, valueInputOption: 'RAW', insertDataOption: 'INSERT_ROWS', requestBody: { values } });
+  }
+  // only one active cohort per track
+  if (clean.active) {
+    for (const x of all) if (x.track === clean.track && x.cohort !== clean.cohort && x.active) {
+      const y = { ...x, active: false }; delete y._row; delete y._updated;
+      await sheets.spreadsheets.values.update({ spreadsheetId: CONFIG_SHEET, range: `${CONFIG_TAB}!A${x._row}:C${x._row}`, valueInputOption: 'RAW', requestBody: { values: [[`${x.track}:${x.cohort}`, new Date().toISOString(), JSON.stringify(y)]] } });
+    }
+  }
+  clearCache();
+}
+async function findProject(track, cohort) {
+  const all = await loadProjects();
+  if (cohort) return all.find(p => p.track === track && p.cohort === cohort);
+  return all.find(p => p.track === track && p.active);
+}
+const PUBLIC_FIELDS = ['track', 'cohort', 'trackName', 'title', 'aim', 'brief', 'siteUrl', 'videoId', 'steps', 'deliverables',
+  'presentation', 'criteria', 'extraNote', 'deadline', 'presentationDate', 'timeline', 'formShortUrl', 'formPrefillBase', 'formFields', 'supportEmail', 'notFoundText'];
+const publicView = p => Object.fromEntries(PUBLIC_FIELDS.map(k => [k, p[k]]));
+
+/* ---------- Grouping sheet ---------- */
+const norm = v => String(v || '').toUpperCase().replace(/\s+/g, '');
+const normEmail = v => String(v || '').trim().toLowerCase();
+
+function colIndex(headers) {
+  const h = headers.map(x => String(x || '').trim().toLowerCase());
+  const find = test => h.findIndex(test);
+  return {
+    group: find(x => x === 'group'),
+    subgroup: find(x => x.includes('sub')),
+    name: find(x => x.includes('name')),
+    number: find(x => x.includes('unique')),
+    email: find(x => x.includes('email')),
+    whatsapp: find(x => x.includes('whatsapp'))
+  };
+}
+
+async function loadGroups(p) {
+  return cached(`groups:${p.track}:${p.cohort}`, 5 * 60e3, async () => {
+    const rows = await readRows(p.groupingSheetId, p.groupingTab);
+    const c = colIndex(rows[0] || []);
+    if (c.group < 0 || c.name < 0) throw new Error('Grouping sheet needs "Group" and "Member name" columns');
+    const unitCol = p.projectUnit === 'subgroup' && c.subgroup >= 0 ? c.subgroup : c.group;
+    const units = new Map(); const byNumber = new Map(); const byEmail = new Map();
+    const issues = { missingNumber: [], duplicateNumber: [], nameInTwoGroups: [], otherTrackPrefix: [], oddFormat: [] };
+    const seenName = new Map();
+    rows.slice(1).forEach((r, i) => {
+      const unit = String(r[unitCol] || '').trim(); const name = String(r[c.name] || '').trim();
+      if (!unit || !name) return;
+      if (!units.has(unit)) units.set(unit, { unit, group: String(r[c.group] || '').trim(), whatsapp: '', members: [] });
+      const u = units.get(unit);
+      const wa = c.whatsapp >= 0 ? String(r[c.whatsapp] || '').trim() : '';
+      if (wa && !u.whatsapp) u.whatsapp = wa.replace(/\\&/g, '&');
+      const number = norm(r[c.number]); const email = normEmail(r[c.email]);
+      const subgroup = c.subgroup >= 0 ? String(r[c.subgroup] || '').trim() : '';
+      const m = { name, number, email, subgroup, row: i + 2 };
+      u.members.push(m);
+      if (!number) issues.missingNumber.push(`${name} (row ${m.row})`);
+      else {
+        if (byNumber.has(number)) issues.duplicateNumber.push(`${number}: rows ${byNumber.get(number).m.row} and ${m.row}`);
+        byNumber.set(number, { unit, m });
+        const prefix = (number.match(/^[A-Z]+/) || [''])[0];
+        if (!/^[A-Z]{2}\d{8}$/.test(number)) issues.oddFormat.push(`${name}: ${number} (row ${m.row})`);
+        else if (p.numberPrefix && prefix !== p.numberPrefix) issues.otherTrackPrefix.push(`${name}: ${number}`);
+      }
+      if (email) byEmail.set(email, { unit, m });
+      const key = name.toLowerCase();
+      if (seenName.has(key) && seenName.get(key) !== unit) issues.nameInTwoGroups.push(`${name}: ${seenName.get(key)} and ${unit}`);
+      seenName.set(key, unit);
+    });
+    return { units, byNumber, byEmail, issues, total: rows.length - 1 };
+  });
+}
+
+/* ---------- Submissions (form responses sheet) ---------- */
+async function loadSubmissions(p) {
+  if (!p.responsesSheetId) return new Map();
+  return cached(`subs:${p.track}:${p.cohort}`, 60e3, async () => {
+    const rows = await readRows(p.responsesSheetId, p.responsesTab);
+    const h = (rows[0] || []).map(x => String(x || '').toLowerCase());
+    const ts = h.findIndex(x => x.includes('timestamp'));
+    const unitHeader = p.projectUnit === 'subgroup' ? (x => x.includes('sub')) : (x => x.includes('group') && !x.includes('sub'));
+    const gi = h.findIndex(unitHeader);
+    const ni = h.findIndex(x => x.includes('name'));
+    const map = new Map();
+    rows.slice(1).forEach(r => {
+      const unit = String(r[gi] || '').trim(); if (!unit) return;
+      if (!map.has(unit)) map.set(unit, []);
+      map.get(unit).push({ name: String(r[ni] || '').trim() || 'A group member', at: String(r[ts] || '') });
+    });
+    return map;
+  });
+}
+
+/* ---------- Rate limit for lookups ---------- */
+const hits = new Map();
+function limited(ip) {
+  const now = Date.now(); const win = 10 * 60e3; const max = 30;
+  const arr = (hits.get(ip) || []).filter(t => now - t < win);
+  arr.push(now); hits.set(ip, arr);
+  if (hits.size > 50000) hits.clear();
+  return arr.length > max;
+}
+
+/* ---------- Public routes ---------- */
+router.get('/config', async (req, res) => {
+  try {
+    const p = await findProject(String(req.query.track || ''), req.query.cohort ? String(req.query.cohort) : null);
+    if (!p) return res.status(404).json({ error: 'No project found for this track' });
+    res.json(publicView(p));
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Could not load project' }); }
+});
+
+router.get('/lookup', async (req, res) => {
+  try {
+    if (limited(req.ip)) return res.status(429).json({ error: 'Too many searches. Wait a few minutes and try again.' });
+    const p = await findProject(String(req.query.track || ''), req.query.cohort ? String(req.query.cohort) : null);
+    if (!p) return res.status(404).json({ found: false });
+    const q = String(req.query.q || '').trim();
+    const data = await loadGroups(p);
+    const hit = q.includes('@') ? data.byEmail.get(normEmail(q)) : data.byNumber.get(norm(q));
+    if (!hit) return res.status(404).json({ found: false });
+    const u = data.units.get(hit.unit);
+    const subs = (await loadSubmissions(p)).get(hit.unit) || [];
+    res.json({
+      found: true,
+      unit: hit.unit,
+      group: u.group,
+      subgroup: hit.m.subgroup,
+      you: hit.m.name,
+      whatsapp: u.whatsapp,
+      members: u.members.map((m, i) => ({ name: m.name, subgroup: m.subgroup, isYou: m === hit.m, suggestedLeader: i === 0 })),
+      submissions: subs
+    });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'Lookup failed' }); }
+});
+
+/* ---------- Submission notifications (called by the form's Apps Script) ---------- */
+const { SESClient, SendEmailCommand } = require('@aws-sdk/client-ses');
 const ses = new SESClient({
-  region: 'us-east-1',
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
-  }
+  region: process.env.PROJECTS_SES_REGION || 'us-east-1',
+  credentials: { accessKeyId: process.env.AWS_ACCESS_KEY_ID, secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY }
 });
+const FROM = process.env.PROJECTS_FROM_EMAIL || 'BeTechified <newsletter@betechified.com>';
+const PAGE_URL = process.env.PROJECTS_PAGE_URL || 'https://betechified.com/projects';
+const escHtml = s => String(s || '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-app.use(cors());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
-
-// ═══════════════════════════════════════════════════════════════════════════
-// STATUS CHECK TOOL - powers betechified.com/status
-// DO NOT REMOVE these two lines when editing this file. Without them the
-// status page shows "We could not reach the server."
-// ═══════════════════════════════════════════════════════════════════════════
-const statusLookup = require('./status-lookup');
-app.use('/api/status', statusLookup);
-
-// ══ TRACK PROJECT PAGES - powers betechified.com/projects and the projects admin page
-// DO NOT REMOVE these lines. trust proxy lets the lookup rate limit see real visitor IPs on Render.
-app.set('trust proxy', 1);
-const projects = require('./projects');
-app.use('/api/projects', projects);
-
-const GEMINI_PROMPT = `You are a verification assistant for BeTechified, an African tech education platform.
-Check whether this screenshot is a WhatsApp chat that contains a message related to BeTechified (a tech education platform, course, or registration).
-
-Be LENIENT — if there is reasonable evidence of either a group chat or a BeTechified-related message, pass it.
-Only reject if the screenshot is clearly not WhatsApp at all, or has absolutely no connection to BeTechified.
-
-Respond with ONLY valid JSON, no markdown, no explanation:
-{"valid": true} or {"valid": false, "reason": "short reason"}`;
-
-
-// ── Google Sheets helper ───────────────────────────────────────────────────
-const getEmailList = async (sheetId, range) => {
-  const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
-  const auth = new google.auth.GoogleAuth({
-    credentials,
-    scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly']
+function notifyEmail(p, unit, submitter, at, recipient) {
+  const link = `${PAGE_URL}?track=${p.track}`;
+  const html = `<div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:32px;color:#1A1A1A;">
+    <p style="font-size:20px;font-weight:bold;color:#D40000;margin:0 0 16px;">Your group's project has been submitted</p>
+    <p>Hi ${escHtml(recipient.name)},</p>
+    <p><strong>${escHtml(submitter)}</strong> submitted the ${escHtml(p.title)} project for <strong>${escHtml(unit)}</strong>${at ? ` on ${escHtml(at)}` : ''}.</p>
+    <p>If your group agreed on this, there is nothing else to do. If this was not the final version, agree in your group chat and submit again before the deadline. The most recent submission before the deadline is the one we grade.</p>
+    <p><a href="${link}" style="display:inline-block;background:#D40000;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:bold;">See your group's submission status</a></p>
+    <hr style="margin:28px 0;border:none;border-top:1px solid #eee;">
+    <p style="color:#888;font-size:12px;">BeTechified, Tech Education for Africa</p></div>`;
+  return new SendEmailCommand({
+    Source: FROM,
+    Destination: { ToAddresses: [recipient.email] },
+    Message: { Subject: { Data: `${unit}: your project has been submitted` }, Body: { Html: { Data: html } } }
   });
+}
 
-  const sheets = google.sheets({ version: 'v4', auth });
-  const response = await sheets.spreadsheets.values.get({
-    spreadsheetId: sheetId,
-    range: range
-  });
-
-  const rows = response.data.values || [];
-  return rows
-    .slice(1) // skip header row
-    .map(row => ({ name: (row[0] || '').trim(), email: (row[1] || '').trim() }))
-    .filter(r => r.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.email));
-};
-
-// ── Campaign send helper ───────────────────────────────────────────────────
-const sendCampaignEmails = async (recipients, subject, htmlTemplate) => {
-  const BATCH_SIZE = 14; // SES default rate limit is 14/sec
-  let sent = 0;
-  let failed = 0;
-
-  for (let i = 0; i < recipients.length; i += BATCH_SIZE) {
-    const batch = recipients.slice(i, i + BATCH_SIZE);
-
-    await Promise.allSettled(batch.map(async (recipient) => {
-      try {
-        const personalised = `
-          <div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:32px;">
-            ${htmlTemplate
-              .replace(/{{name}}/g, recipient.name)
-              .replace(/{{email}}/g, recipient.email)}
-            <hr style="margin:32px 0;border:none;border-top:1px solid #eee;" />
-            <p style="color:#888;font-size:12px;">BeTechified — Tech Education for Africa</p>
-          </div>`;
-
-        await ses.send(new SendEmailCommand({
-          Source: 'BeTechified <newsletter@betechified.com>',
-          Destination: { ToAddresses: [recipient.email] },
-          Message: {
-            Subject: { Data: subject },
-            Body: { Html: { Data: personalised } }
-          }
-        }));
-        sent++;
-      } catch (e) {
-        console.error('Failed to send to ' + recipient.email + ':', e.message);
-        failed++;
-      }
-    }));
-
-    // Pause 1 second between batches to respect SES rate limits
-    if (i + BATCH_SIZE < recipients.length) {
-      await new Promise(r => setTimeout(r, 1000));
-    }
+async function sendToGroup(p, unit, submitter, at, members) {
+  const list = members.filter(m => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m.email));
+  let sent = 0, failed = 0;
+  for (let i = 0; i < list.length; i += 14) {
+    const batch = list.slice(i, i + 14);
+    const r = await Promise.allSettled(batch.map(m => ses.send(notifyEmail(p, unit, submitter, at, m))));
+    r.forEach((x, j) => { if (x.status === 'fulfilled') sent++; else { failed++; console.error('Project email failed', batch[j].email, x.reason && x.reason.message); } });
+    if (i + 14 < list.length) await new Promise(res => setTimeout(res, 1000));
   }
+  console.log(`Project notification ${p.track}:${p.cohort} ${unit}: ${sent} sent, ${failed} failed`);
+}
 
-  return { sent, failed };
-};
-
-
-// ── /verify ────────────────────────────────────────────────────────────────
-app.post('/verify', upload.array('screenshots', 5), async (req, res) => {
+router.post('/notify', async (req, res) => {
   try {
-    const files = req.files;
+    const b = req.body || {};
+    const secret = Buffer.from(String(b.secret || '')); const real = Buffer.from(String(process.env.PROJECTS_NOTIFY_SECRET || ''));
+    if (!real.length || secret.length !== real.length || !crypto.timingSafeEqual(secret, real)) return res.status(401).json({ error: 'Wrong secret' });
+    const p = await findProject(String(b.track || ''), b.cohort ? String(b.cohort) : null);
+    if (!p) return res.status(404).json({ check: 'No project set up for this track' });
+    const unit = String(b.group || '').trim();
+    cache.delete(`subs:${p.track}:${p.cohort}`); // new submission shows on the page straight away
+    const data = await loadGroups(p);
+    const u = data.units.get(unit);
+    if (!u) return res.json({ check: `Group "${unit}" not found in the grouping sheet` });
 
-    if (!files || files.length === 0) {
-      return res.status(400).json({ passed: false, message: 'No screenshots uploaded.' });
+    // verify the submitter belongs to the group they chose
+    let check = 'Not verified (no unique number on form)';
+    const num = norm(b.number);
+    if (num) {
+      const hit = data.byNumber.get(num);
+      check = !hit ? 'Unique number not found' : hit.unit === unit ? 'Verified' : `Submitter is in ${hit.unit}, not ${unit}`;
     }
-    if (files.length < 5) {
-      return res.status(400).json({ passed: false, message: `Please upload all 5 screenshots. You only uploaded ${files.length}.` });
-    }
+    res.json({ check, emailsQueued: u.members.filter(m => m.email).length });
+    if (check === 'Verified' || !num) sendToGroup(p, unit, String(b.name || 'A group member').trim(), String(b.at || ''), u.members).catch(e => console.error(e));
+  } catch (e) { console.error(e); res.status(500).json({ check: 'Server error: ' + e.message }); }
+});
 
-    // Duplicate detection
-    const fingerprints = files.map(f => f.size + '-' + f.buffer.slice(0, 16).toString('hex'));
-    if (new Set(fingerprints).size < files.length) {
-      return res.status(400).json({ passed: false, message: 'Duplicate screenshots detected. Each screenshot must be from a different WhatsApp group.' });
-    }
+/* ---------- Admin ---------- */
+function isAdmin(req) {
+  const a = Buffer.from(String(req.headers['x-admin-key'] || ''));
+  const b = Buffer.from(String(process.env.PROJECTS_ADMIN_KEY || ''));
+  return b.length > 0 && a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+const admin = express.Router();
+admin.use((req, res, next) => isAdmin(req) ? next() : res.status(401).json({ error: 'Wrong admin key' }));
 
-    // temperature: 0 makes the model give the same answer for the same screenshot every time (no more flip-flopping)
-    const model = genAI.getGenerativeModel({
-      model: 'gemini-2.5-flash-lite',
-      generationConfig: { temperature: 0 }
+admin.get('/projects', async (req, res) => {
+  try { res.json(await loadProjects()); } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
+});
+admin.put('/projects', async (req, res) => {
+  try {
+    const p = req.body || {};
+    if (!/^[a-z]{2,4}$/.test(p.track || '') || !/^[a-z0-9-]{3,20}$/.test(p.cohort || '')) return res.status(400).json({ error: 'Track and cohort codes are required (lowercase, e.g. pd and oct26)' });
+    await saveProject(p); res.json({ ok: true });
+  } catch (e) { console.error(e); res.status(500).json({ error: e.message }); }
+});
+admin.post('/check', async (req, res) => {
+  try {
+    const p = req.body || {};
+    clearCache();
+    const g = await loadGroups(p);
+    const subs = await loadSubmissions(p);
+    res.json({
+      ok: true,
+      rows: g.total,
+      units: [...g.units.values()].map(u => ({ unit: u.unit, members: u.members.length, suggestedLeader: u.members[0] && u.members[0].name, whatsapp: !!u.whatsapp, submissions: (subs.get(u.unit) || []).length })),
+      issues: g.issues
     });
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      let parsed;
-      try {
-        const result = await model.generateContent([
-          GEMINI_PROMPT,
-          { inlineData: { mimeType: file.mimetype || 'image/jpeg', data: file.buffer.toString('base64') } }
-        ]);
-        const text = result.response.text().trim().replace(/```json|```/g, '').trim();
-        parsed = JSON.parse(text);
-      } catch (err) {
-        console.error('Gemini error on screenshot ' + (i + 1) + ':', err.message);
-        return res.status(400).json({
-          passed: false,
-          screenshotIndex: i + 1,
-          message: 'Screenshot ' + (i + 1) + ' could not be verified. Please re-upload a clearer image.'
-        });
-      }
-
-      if (!parsed.valid) {
-        return res.status(400).json({
-          passed: false,
-          screenshotIndex: i + 1,
-          message: 'Screenshot ' + (i + 1) + ' was rejected: ' + (parsed.reason || 'does not show a WhatsApp group chat with a BeTechified message') + '. Please re-upload that screenshot.'
-        });
-      }
-    }
-
-    res.json({ passed: true });
-  } catch (err) {
-    console.error('Verify error:', err);
-    res.status(500).json({ passed: false, message: 'Server error during verification.' });
+  } catch (e) {
+    const msg = /permission|403/i.test(e.message) ? 'The service account cannot open this sheet. Share it with the service account email.' :
+      /not supported|400/i.test(e.message) ? 'This looks like an uploaded Excel file. Open it in Google Sheets and use File, Save as Google Sheets, then use the new link.' : e.message;
+    res.status(400).json({ ok: false, error: msg });
   }
 });
-
-// ── /register ──────────────────────────────────────────────────────────────
-app.post('/register', async (req, res) => {
-  try {
-    const { name, email, phone, country, city, course } = req.body;
-
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      return res.status(400).json({ success: false, error: 'Invalid email address.' });
-    }
-
-    const year = '26';
-    const month = '09';
-    const prefix = course + year + month;
-
-    // Check if already registered
-    const { data: existingEmail } = await supabase
-      .from('registrants')
-      .select('unique_number')
-      .eq('email', email)
-      .like('unique_number', prefix + '%');
-
-    if (existingEmail && existingEmail.length > 0) {
-      return res.json({ success: false, already_registered: true, unique_number: existingEmail[0].unique_number });
-    }
-
-    // Fetch ALL numbers for this course prefix and pick highest mathematically
-    let allExisting = [];
-    let from = 0;
-    const PAGE = 1000;
-    while (true) {
-      const { data, error } = await supabase
-        .from('registrants')
-        .select('unique_number')
-        .like('unique_number', prefix + '%')
-        .range(from, from + PAGE - 1);
-      if (error) throw error;
-      if (!data || data.length === 0) break;
-      allExisting = allExisting.concat(data);
-      if (data.length < PAGE) break;
-      from += PAGE;
-    }
-
-    let nextSeq = 1;
-    if (allExisting.length > 0) {
-      const nums = allExisting
-        .map(r => parseInt(r.unique_number.replace(prefix, '')))
-        .filter(n => !isNaN(n));
-      if (nums.length > 0) nextSeq = Math.max(...nums) + 1;
-    }
-    const generatedNumber = prefix + String(nextSeq).padStart(4, '0');
-
-    // Save to Supabase
-    const { error } = await supabase
-      .from('registrants')
-      .insert([{ name, email, phone, country, city, course, unique_number: generatedNumber }]);
-
-    if (error) throw error;
-
-    // Send confirmation email
-    try {
-      await ses.send(new SendEmailCommand({
-        Source: 'newsletter@betechified.com',
-        Destination: { ToAddresses: [email] },
-        Message: {
-          Subject: { Data: 'Your BeTechified Unique Number - ' + generatedNumber },
-          Body: {
-            Html: {
-              Data: '<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:32px;"><h2 style="color:#D40000;">You\'re verified! 🎉</h2><p>Hi ' + name + ',</p><p>Your unique number for the <strong>' + course + '</strong> track is:</p><div style="background:#f5f5f5;border-left:4px solid #D40000;padding:16px 24px;margin:24px 0;font-size:28px;font-weight:bold;letter-spacing:4px;">' + generatedNumber + '</div><p>Use this number to submit your assignments when classes start.</p><p>Don\'t miss the Onboarding Session — it\'s where you\'ll get everything you need to hit the ground running. Keep an eye on the learning group on WhatsApp for the schedule and link.</p><p>Welcome to BeTechified! 🚀</p><hr style="margin:32px 0;border:none;border-top:1px solid #eee;" /><p style="text-align:center;margin:0 0 16px 0;"><a href="https://www.instagram.com/betechified" style="color:#888;text-decoration:none;margin:0 8px;font-size:12px;">Instagram</a>|<a href="https://x.com/betechified" style="color:#888;text-decoration:none;margin:0 8px;font-size:12px;">X</a>|<a href="https://www.facebook.com/profile.php?id=61555470444491" style="color:#888;text-decoration:none;margin:0 8px;font-size:12px;">Facebook</a>|<a href="https://www.linkedin.com/company/betechified/" style="color:#888;text-decoration:none;margin:0 8px;font-size:12px;">LinkedIn</a>|<a href="https://youtube.com/@be_techified" style="color:#888;text-decoration:none;margin:0 8px;font-size:12px;">YouTube</a>|<a href="https://www.tiktok.com/@betechified" style="color:#888;text-decoration:none;margin:0 8px;font-size:12px;">TikTok</a></p><p style="color:#888;font-size:12px;text-align:center;">BeTechified — Tech Education for Africa</p></div>'
-            }
-          }
-        }
-      }));
-    } catch (emailErr) {
-      console.error('Email error:', emailErr);
-    }
-
-    res.json({ success: true, unique_number: generatedNumber });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, error: 'Could not save registration' });
-  }
+admin.post('/refresh', (req, res) => { clearCache(); res.json({ ok: true }); });
+admin.get('/service-account', (req, res) => {
+  try { res.json({ email: JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON || '{}').client_email || '' }); } catch { res.json({ email: '' }); }
 });
+router.use('/admin/api', admin);
+router.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'public', 'projects-admin.html')));
 
-// ── /send-bulk ─────────────────────────────────────────────────────────────
-app.post('/send-bulk', async (req, res) => {
-  try {
-    const { recipients, subject, body } = req.body;
-    let sent = 0;
-
-    for (const recipient of recipients) {
-      try {
-        await ses.send(new SendEmailCommand({
-          Source: 'newsletter@betechified.com',
-          Destination: { ToAddresses: [recipient.email] },
-          Message: {
-            Subject: { Data: subject },
-            Body: {
-              Html: {
-                Data: '<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:32px;"><h2 style="color:#D40000;">BeTechified</h2><p>Hi ' + recipient.name + ',</p>' + body.replace(/\n/g, '<br/>') + '<hr style="margin:32px 0;border:none;border-top:1px solid #eee;" /><p style="color:#888;font-size:12px;">BeTechified — Tech Education for Africa</p></div>'
-              }
-            }
-          }
-        }));
-        sent++;
-        await new Promise(r => setTimeout(r, 100));
-      } catch (emailErr) {
-        console.error('Failed to send to ' + recipient.email + ':', emailErr.message);
-      }
-    }
-
-    res.json({ success: true, sent });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, error: 'Bulk send failed' });
-  }
-});
-
-// ── /preview-recipients ────────────────────────────────────────────────────
-// Used by the campaign UI to check how many valid recipients are in a sheet
-app.post('/preview-recipients', async (req, res) => {
-  try {
-    const { sheetUrl, sheetRange } = req.body;
-
-    const sheetId = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/)?.[1];
-    if (!sheetId) return res.status(400).json({ error: 'Invalid Google Sheet URL.' });
-
-    const recipients = await getEmailList(sheetId, sheetRange || 'Sheet1!A:B');
-    res.json({ count: recipients.length });
-  } catch (err) {
-    console.error('Preview error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ── /send-campaign ─────────────────────────────────────────────────────────
-// Reads recipients from a Google Sheet and sends a campaign email to all of them
-app.post('/send-campaign', async (req, res) => {
-  try {
-    const { sheetUrl, sheetRange, subject, htmlTemplate } = req.body;
-
-    if (!sheetUrl || !subject || !htmlTemplate) {
-      return res.status(400).json({ error: 'sheetUrl, subject, and htmlTemplate are required.' });
-    }
-
-    const sheetId = sheetUrl.match(/\/d\/([a-zA-Z0-9-_]+)/)?.[1];
-    if (!sheetId) return res.status(400).json({ error: 'Invalid Google Sheet URL.' });
-
-    const recipients = await getEmailList(sheetId, sheetRange || 'Sheet1!A:B');
-    if (!recipients.length) {
-      return res.status(400).json({ error: 'No valid recipients found in that sheet. Check the URL, tab name, and column range.' });
-    }
-
-    console.log(`Campaign starting: "${subject}" → ${recipients.length} recipients`);
-
-    const { sent, failed } = await sendCampaignEmails(recipients, subject, htmlTemplate);
-
-    console.log(`Campaign done. Sent: ${sent}, Failed: ${failed}`);
-    res.json({ success: true, total: recipients.length, sent, failed });
-  } catch (err) {
-    console.error('Campaign error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ── /notify-fixed ──────────────────────────────────────────────────────────
-app.post('/notify-fixed', async (req, res) => {
-  const { secret } = req.body;
-  if (secret !== 'betechfix2026') {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-
-  try {
-    // Fetch all DA registrants in batches
-    let allDA = [];
-    let from = 0;
-    const PAGE = 1000;
-    while (true) {
-      const { data, error } = await supabase
-        .from('registrants')
-        .select('name, email, unique_number')
-        .eq('course', 'DA')
-        .range(from, from + PAGE - 1);
-      if (error) throw error;
-      if (!data || data.length === 0) break;
-      allDA = allDA.concat(data);
-      if (data.length < PAGE) break;
-      from += PAGE;
-    }
-
-    // Filter: only DA numbers above 1000
-    const toNotify = allDA.filter(r => {
-      const numPart = r.unique_number.replace('DA2604', '');
-      const num = parseInt(numPart);
-      return !isNaN(num) && num > 1000;
-    });
-
-    console.log('Total DA fetched:', allDA.length, 'To notify:', toNotify.length);
-
-    let sent = 0;
-    let failed = 0;
-
-    for (const person of toNotify) {
-      try {
-        await ses.send(new SendEmailCommand({
-          Source: 'newsletter@betechified.com',
-          Destination: { ToAddresses: [person.email] },
-          Message: {
-            Subject: { Data: 'Your Correct BeTechified Unique Number' },
-            Body: {
-              Html: {
-                Data: `<div style="font-family:sans-serif;max-width:500px;margin:0 auto;padding:32px;">
-                  <h2 style="color:#D40000;">Important Update 🔔</h2>
-                  <p>Hi ${person.name},</p>
-                  <p>Due to a technical issue, your BeTechified unique number was updated. Your correct number is:</p>
-                  <div style="background:#f5f5f5;border-left:4px solid #D40000;padding:16px 24px;margin:24px 0;font-size:28px;font-weight:bold;letter-spacing:4px;">${person.unique_number}</div>
-                  <p>Please use this number going forward for assignments and class access. We apologise for any confusion.</p>
-                  <p>Welcome to BeTechified! 🚀</p>
-                  <hr style="margin:32px 0;border:none;border-top:1px solid #eee;" />
-                  <p style="color:#888;font-size:12px;">BeTechified — Tech Education for Africa</p>
-                </div>`
-              }
-            }
-          }
-        }));
-        sent++;
-        await new Promise(r => setTimeout(r, 150));
-      } catch (emailErr) {
-        console.error('Failed to notify ' + person.email + ':', emailErr.message);
-        failed++;
-      }
-    }
-
-    res.json({ success: true, sent, failed });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Notification failed' });
-  }
-});
-
-// ── Keep Supabase alive ────────────────────────────────────────────────────
-const FOUR_DAYS = 4 * 24 * 60 * 60 * 1000;
-setInterval(async () => {
-  try {
-    await supabase.from('registrants').select('id').limit(1);
-    console.log('Supabase keep-alive ping sent');
-  } catch (err) {
-    console.error('Keep-alive ping failed:', err.message);
-  }
-}, FOUR_DAYS);
-
-// ── Start ──────────────────────────────────────────────────────────────────
-app.get('/', (req, res) => {
-  res.send('BeTechified Verification Server is running ✅');
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log('Server running on port ' + PORT));
+module.exports = router;
