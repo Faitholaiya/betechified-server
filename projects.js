@@ -110,11 +110,13 @@ async function findProject(track, cohort) {
   return all.find(p => p.track === track && p.active);
 }
 const PUBLIC_FIELDS = ['track', 'cohort', 'trackName', 'title', 'aim', 'brief', 'siteUrl', 'videoId', 'steps', 'deliverables',
-  'presentation', 'criteria', 'extraNote', 'deadline', 'presentationDate', 'timeline', 'formShortUrl', 'formPrefillBase', 'formFields', 'supportEmail', 'notFoundText'];
+  'presentation', 'criteria', 'extraNote', 'deadline', 'presentationDate', 'timeline', 'formShortUrl', 'formPrefillBase', 'formFields', 'supportEmail', 'notFoundText', 'siteLabel', 'groupTasks', 'groupTasksLabel'];
 const publicView = p => Object.fromEntries(PUBLIC_FIELDS.map(k => [k, p[k]]));
 
 /* ---------- Grouping sheet ---------- */
 const norm = v => String(v || '').toUpperCase().replace(/\s+/g, '');
+// "26100223.0" or "26100223" become "FD26100223" when the track prefix is known
+const normNum = (v, prefix) => { let n = norm(v).replace(/\.0+$/, ''); if (prefix && /^\d{8}$/.test(n)) n = prefix + n; return n; };
 // "group 1", "GROUP 1 ", "Group1" all become "Group 1"; "group 1a" becomes "Group 1A"
 const unitName = v => { const t = String(v || '').trim().replace(/\s+/g, ' '); const m = t.match(/^group\s*(\d+)\s*([a-z]?)$/i); return m ? `Group ${m[1]}${m[2].toUpperCase()}` : t; };
 const normEmail = v => String(v || '').trim().toLowerCase();
@@ -158,7 +160,7 @@ async function loadGroups(p) {
       const u = units.get(unit);
       const wa = c.whatsapp >= 0 ? String(r[c.whatsapp] || '').trim() : '';
       if (wa && !u.whatsapp) u.whatsapp = wa.replace(/\\&/g, '&');
-      const number = norm(r[c.number]); const email = normEmail(r[c.email]);
+      const number = normNum(r[c.number], p.numberPrefix); const email = normEmail(r[c.email]);
       const subgroup = lastSub;
       const m = { name, number, email, subgroup, row: i + 2 };
       u.members.push(m);
@@ -235,7 +237,7 @@ router.get('/lookup', async (req, res) => {
     if (!p) return res.status(404).json({ found: false });
     const q = String(req.query.q || '').trim();
     const data = await loadGroups(p);
-    const hit = q.includes('@') ? data.byEmail.get(normEmail(q)) : data.byNumber.get(norm(q));
+    const hit = q.includes('@') ? data.byEmail.get(normEmail(q)) : data.byNumber.get(normNum(q, p.numberPrefix));
     if (!hit) return res.status(404).json({ found: false });
     const u = data.units.get(hit.unit);
     const subs = (await loadSubmissions(p)).get(hit.unit) || [];
@@ -306,7 +308,7 @@ router.post('/notify', async (req, res) => {
 
     // verify the submitter belongs to the group they chose
     let check = 'Not verified (no unique number on form)';
-    const num = norm(b.number);
+    const num = normNum(b.number, p.numberPrefix);
     if (num) {
       const hit = data.byNumber.get(num);
       check = !hit ? 'Unique number not found' : hit.unit === unit ? 'Verified' : `Submitter is in ${hit.unit}, not ${unit}`;
