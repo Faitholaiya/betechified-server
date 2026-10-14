@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Projects admin | BeTechified</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Jost:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--red:#D40000;--red-deep:#9E0000;--tint:#FBE9E9;--ink:#1A1A1A;--soft:#5E5858;--line:#E3DEDE;--surface:#FFF;--page:#F7F5F5;--ok:#1F6F43;--okbg:#E7F4EC;--warn:#7A4B00;--warnbg:#FFF3DC;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--red:#FF5A5A;--red-deep:#C21F1F;--tint:#2A1515;--ink:#F1EEEE;--soft:#B5AEAE;--line:#3A3434;--surface:#1E1B1B;--page:#141212;--ok:#7BD3A0;--okbg:#14261C;--warn:#F2C46B;--warnbg:#2A2214;color-scheme:dark}}
+*{box-sizing:border-box}body{margin:0;background:var(--page);color:var(--ink);font:16px/1.5 'Jost','Segoe UI',Arial,sans-serif}
+header{background:var(--red-deep);color:#fff;padding:14px 24px;display:flex;justify-content:space-between;align-items:center}
+header b{font-family:'Cormorant Garamond',Georgia,serif;font-size:22px}
+.wrap{max-width:1000px;margin:0 auto;padding:24px}
+h1,h2{font-family:'Cormorant Garamond',Georgia,serif;font-weight:700;margin:0 0 8px}h1{font-size:32px}h2{font-size:24px;margin-top:8px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:18px}
+label{display:block;font-weight:500;font-size:14px;margin:12px 0 4px}
+.help{font-size:13px;color:var(--soft);margin:2px 0 0}
+input,select,textarea{width:100%;font:inherit;padding:9px 11px;border:1.5px solid var(--line);border-radius:8px;background:var(--page);color:var(--ink)}
+textarea{min-height:96px;resize:vertical}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:0 18px}
+.btn{font:inherit;font-weight:600;border:0;border-radius:8px;padding:10px 16px;background:var(--red);color:#fff;cursor:pointer}
+.btn:hover{background:var(--red-deep)}.btn.ghost{background:transparent;color:var(--red);border:1.5px solid var(--red)}
+.btn:disabled{opacity:.5}.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
+table{width:100%;border-collapse:collapse;font-size:15px}th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line)}th{font-weight:600;color:var(--soft);font-size:13px}
+.pill{display:inline-block;padding:2px 10px;border-radius:999px;font-size:13px}.pill.on{background:var(--okbg);color:var(--ok)}.pill.off{background:var(--page);color:var(--soft);border:1px solid var(--line)}
+.linkish{background:none;border:0;color:var(--red);font:inherit;cursor:pointer;padding:0 6px 0 0;text-decoration:underline}
+.note{padding:12px 14px;border-radius:8px;font-size:14px;margin-top:12px}.note.ok{background:var(--okbg);color:var(--ok)}.note.err{background:var(--tint);color:var(--red)}.note.warn{background:var(--warnbg);color:var(--warn)}
+.note ul{margin:6px 0 0;padding-left:18px}
+.tablewrap{overflow-x:auto}
+code{background:var(--page);padding:1px 6px;border-radius:4px;font-size:14px}
+[hidden]{display:none!important}
+@media (max-width:720px){.grid{grid-template-columns:1fr}}
+a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #D4AF37;outline-offset:2px}
+</style>
+</head>
+<body>
+<header><b>BeTechified</b><span>Projects admin</span></header>
+<div class="wrap">
+
+  <!-- Login -->
+  <div class="card" id="login">
+    <h1>Sign in</h1>
+    <label for="key">Admin key</label>
+    <input id="key" type="password" autocomplete="current-password">
+    <div class="actions"><button class="btn" id="loginBtn">Sign in</button></div>
+    <div id="loginMsg"></div>
+  </div>
+
+  <div id="app" hidden>
+    <!-- List -->
+    <div class="card">
+      <h1>Track projects</h1>
+      <p class="help">One entry per track per cohort. Only the cohort marked active shows on a track's project page. Share every grouping and responses sheet with <code id="saEmail">the service account</code> as Viewer.</p>
+      <div class="tablewrap"><table><thead><tr><th>Track</th><th>Cohort</th><th>Deadline (Lagos)</th><th>Status</th><th></th></tr></thead><tbody id="list"></tbody></table></div>
+      <div class="actions">
+        <button class="btn" id="newBtn">New project</button>
+        <button class="btn ghost" id="importBtn">Import settings</button>
+        <button class="btn ghost" id="refreshBtn">Refresh live data</button>
+      </div>
+      <div id="listMsg"></div>
+    </div>
+
+    <!-- Import -->
+    <div class="card" id="importCard" hidden>
+      <h2>Import settings</h2>
+      <p class="help">Paste a settings file (JSON) and save it as a project.</p>
+      <textarea id="importText" style="min-height:160px"></textarea>
+      <div class="actions"><button class="btn" id="importGo">Load into editor</button><button class="btn ghost" id="importCancel">Cancel</button></div>
+    </div>
+
+    <!-- Editor -->
+    <form class="card" id="editor" hidden novalidate>
+      <h2 id="editorTitle">Project</h2>
+
+      <h2 style="font-size:20px;margin-top:20px">Track and cohort</h2>
+      <div class="grid">
+        <div><label for="f_track">Track</label>
+          <select id="f_track">
+            <option value="pd">Product Design</option><option value="pm">Product Management</option>
+            <option value="da">Data Analytics</option><option value="fd">Frontend Development</option>
+            <option value="bd">Backend Development</option><option value="dm">Digital Marketing</option>
+          </select></div>
+        <div><label for="f_cohort">Cohort code</label><input id="f_cohort" placeholder="oct26"><p class="help">Lowercase, used in the page link.</p></div>
+        <div><label for="f_trackName">Name shown on the page</label><input id="f_trackName" placeholder="Product Design, Beginners Class"></div>
+        <div><label for="f_active">Show on the project page</label><select id="f_active"><option value="true">Yes, this is the active cohort</option><option value="false">No</option></select></div>
+      </div>
+
+      <h2 style="font-size:20px;margin-top:24px">Sheets</h2>
+      <label for="f_grouping">Grouping sheet link</label><input id="f_grouping" placeholder="https://docs.google.com/spreadsheets/d/...">
+      <p class="help">Must be a Google Sheet, not an uploaded Excel file. Columns used: Group, Sub-group, Member name, WhatsApp link, Unique Number, Email Address.</p>
+      <label for="f_responses">Form responses sheet link</label><input id="f_responses" placeholder="https://docs.google.com/spreadsheets/d/...">
+      <p class="help">The sheet linked to the submission form. Used to show each group whether they have submitted.</p>
+      <div class="grid">
+        <div><label for="f_unit">Who submits one project</label><select id="f_unit"><option value="group">Each group (Group 1, Group 2)</option><option value="subgroup">Each sub-group (Group 1A, Group 1B)</option></select></div>
+        <div><label for="f_prefix">Unique number prefix for this track</label><input id="f_prefix" placeholder="PD"><p class="help">Used only to flag numbers from other tracks in the check.</p></div>
+      </div>
+      <div class="actions"><button type="button" class="btn ghost" id="checkBtn">Check sheets</button></div>
+      <div id="checkMsg"></div>
+
+      <h2 style="font-size:20px;margin-top:24px">Submission form</h2>
+      <label for="f_prefill">Pre-filled form link</label><input id="f_prefill" placeholder="https://docs.google.com/forms/d/e/.../viewform?usp=pp_url&entry...">
+      <p class="help">In the form editor, open the three-dot menu, choose Get pre-filled link, type <code>GROUP</code> in the group field, <code>NAME</code> in the name field and <code>NUMBER</code> in the unique number field, then paste the link here.</p>
+      <div class="grid">
+        <div><label for="f_eGroup">Group field ID</label><input id="f_eGroup" placeholder="entry.123"></div>
+        <div><label for="f_eName">Name field ID</label><input id="f_eName" placeholder="entry.456"></div>
+        <div><label for="f_eNumber">Unique number field ID</label><input id="f_eNumber" placeholder="entry.789"></div>
+        <div><label for="f_short">Short form link (fallback)</label><input id="f_short" placeholder="https://forms.gle/..."></div>
+      </div>
+
+      <h2 style="font-size:20px;margin-top:24px">Dates</h2>
+      <div class="grid">
+        <div><label for="f_deadline">Submission deadline (Lagos time)</label><input id="f_deadline" type="datetime-local"></div>
+        <div><label for="f_presentation">Presentation</label><input id="f_presentation" placeholder="Saturday 31st October, Week 4 live class"></div>
+      </div>
+
+      <h2 style="font-size:20px;margin-top:24px">Project content</h2>
+      <label for="f_title">Project title</label><input id="f_title">
+      <label for="f_aim">Aim</label><textarea id="f_aim" style="min-height:60px"></textarea>
+      <label for="f_brief">Brief</label><textarea id="f_brief" style="min-height:70px"></textarea>
+      <div class="grid">
+        <div><label for="f_site">Resource link (optional)</label><input id="f_site"><p class="help">For example the website to redesign or a dataset.</p></div>
+        <div><label for="f_siteLabel">Resource button text</label><input id="f_siteLabel" placeholder="Open the website to redesign"></div>
+      </div>
+      <label for="f_video">Project guide video (YouTube link)</label><input id="f_video">
+      <label for="f_steps">Steps</label><textarea id="f_steps"></textarea><p class="help">One step per line, written as: Step title | short description</p>
+      <label for="f_deliverables">What the group submits</label><textarea id="f_deliverables"></textarea><p class="help">One item per line.</p>
+      <label for="f_presText">How the presentation works</label><textarea id="f_presText" style="min-height:60px"></textarea>
+      <label for="f_criteria">Judging criteria</label><textarea id="f_criteria"></textarea><p class="help">One per line. Add marks if you have them, for example: Figma design (25 marks)</p>
+      <label for="f_extra">Extra note (optional)</label><input id="f_extra">
+      <div class="grid">
+        <div><label for="f_support">Support email</label><input id="f_support" placeholder="operations@betechified.com"></div>
+        <div><label for="f_notFound">Message when a number is not found</label><input id="f_notFound"></div>
+      </div>
+
+      <div class="actions">
+        <button type="submit" class="btn" id="saveBtn">Save project</button>
+        <button type="button" class="btn ghost" id="exportBtn">Copy settings</button>
+        <button type="button" class="btn ghost" id="cancelBtn">Close</button>
+      </div>
+      <div id="saveMsg"></div>
+    </form>
+  </div>
+</div>
+
+<script>
+const BASE = location.pathname.replace(/\/admin\/?$/, '');
+let KEY = ''; let PROJECTS = [];
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const note = (el, cls, html) => { $(el).innerHTML = html ? `<div class="note ${cls}">${html}</div>` : ''; };
+const TRACKS = {pd:'Product Design',pm:'Product Management',da:'Data Analytics',fd:'Frontend Development',bd:'Backend Development',dm:'Digital Marketing'};
+
+async function api(path, opts = {}) {
+  const r = await fetch(`${BASE}/admin/api${path}`, { ...opts, headers: { 'Content-Type': 'application/json', 'X-Admin-Key': KEY } });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || `Request failed (${r.status})`);
+  return data;
+}
+const sheetId = url => (String(url).match(/\/d\/([a-zA-Z0-9_-]{20,})/) || [, String(url).trim()])[1];
+const sheetUrl = id => id ? `https://docs.google.com/spreadsheets/d/${id}/edit` : '';
+const ytId = url => (String(url).match(/(?:youtu\.be\/|v=|embed\/)([\w-]{11})/) || [, String(url).trim()])[1];
+const lines = v => v.split('\n').map(s => s.trim()).filter(Boolean);
+const lagosLocal = iso => iso ? new Date(new Date(iso).getTime() + 3600e3).toISOString().slice(0,16) : '';
+const lagosShow = iso => iso ? new Date(iso).toLocaleString('en-GB',{timeZone:'Africa/Lagos',day:'numeric',month:'short',year:'numeric',hour:'numeric',minute:'2-digit',hour12:true}) : 'Not set';
+
+/* Login */
+$('loginBtn').onclick = async () => {
+  KEY = $('key').value.trim();
+  try {
+    await loadList();
+    try { sessionStorage.setItem('pk', KEY); } catch {}
+    $('login').hidden = true; $('app').hidden = false;
+    api('/service-account').then(d => { if (d.email) $('saEmail').textContent = d.email; }).catch(() => {});
+  } catch (e) { note('loginMsg', 'err', esc(e.message)); }
+};
+$('key').addEventListener('keydown', e => { if (e.key === 'Enter') $('loginBtn').click(); });
+try { const k = sessionStorage.getItem('pk'); if (k) { $('key').value = k; $('loginBtn').click(); } } catch {}
+
+/* List */
+async function loadList() {
+  PROJECTS = await api('/projects');
+  PROJECTS.sort((a,b) => (a.track+b.cohort).localeCompare(b.track+a.cohort));
+  $('list').innerHTML = PROJECTS.length ? PROJECTS.map((p,i) => `<tr>
+    <td>${esc(TRACKS[p.track] || p.track)}</td><td>${esc(p.cohort)}</td><td>${esc(lagosShow(p.deadline))}</td>
+    <td><span class="pill ${p.active ? 'on' : 'off'}">${p.active ? 'Active' : 'Not active'}</span></td>
+    <td><button class="linkish" data-edit="${i}">Edit</button><button class="linkish" data-dup="${i}">Copy for new cohort</button></td></tr>`).join('')
+    : `<tr><td colspan="5">No projects yet. Create one with New project, or import settings.</td></tr>`;
+}
+$('list').onclick = e => {
+  const ed = e.target.dataset.edit, dup = e.target.dataset.dup;
+  if (ed !== undefined) openEditor(PROJECTS[ed], 'Edit project');
+  if (dup !== undefined) {
+    const p = { ...PROJECTS[dup], cohort: '', groupingSheetId: '', responsesSheetId: '', deadline: '', presentationDate: '', active: true };
+    openEditor(p, 'New cohort (copied content, add the new sheets and dates)');
+  }
+};
+$('newBtn').onclick = () => openEditor({ active: true, projectUnit: 'group', track: 'pd', supportEmail: 'operations@betechified.com' }, 'New project');
+$('refreshBtn').onclick = async () => { try { await api('/refresh', { method: 'POST' }); note('listMsg','ok','Live data refreshed. Pages now show the latest groupings and submissions.'); } catch (e) { note('listMsg','err',esc(e.message)); } };
+$('importBtn').onclick = () => { $('importCard').hidden = false; $('importText').focus(); };
+$('importCancel').onclick = () => { $('importCard').hidden = true; };
+$('importGo').onclick = () => {
+  try { const p = JSON.parse($('importText').value); $('importCard').hidden = true; openEditor(p, 'Imported project (check and save)'); }
+  catch { alert('That is not valid settings JSON.'); }
+};
+
+/* Editor */
+function openEditor(p, title) {
+  $('editorTitle').textContent = title;
+  const f = p.formFields || {};
+  const set = (id, v) => $(id).value = v ?? '';
+  set('f_track', p.track || 'pd'); set('f_cohort', p.cohort); set('f_trackName', p.trackName); set('f_active', String(p.active !== false));
+  set('f_grouping', sheetUrl(p.groupingSheetId)); set('f_responses', sheetUrl(p.responsesSheetId));
+  set('f_unit', p.projectUnit || 'group'); set('f_prefix', p.numberPrefix || (p.track || 'pd').toUpperCase());
+  set('f_prefill', p.formPrefillBase ? p.formPrefillBase + '?usp=pp_url' : ''); set('f_eGroup', f.group); set('f_eName', f.name); set('f_eNumber', f.number); set('f_short', p.formShortUrl);
+  set('f_deadline', lagosLocal(p.deadline)); set('f_presentation', p.presentationDate);
+  set('f_title', p.title); set('f_aim', p.aim); set('f_brief', p.brief); set('f_site', p.siteUrl); set('f_siteLabel', p.siteLabel);
+  set('f_video', p.videoId ? `https://youtu.be/${p.videoId}` : '');
+  set('f_steps', (p.steps || []).map(s => `${s[0]} | ${s[1]}`).join('\n'));
+  set('f_deliverables', (p.deliverables || []).join('\n')); set('f_presText', p.presentation);
+  set('f_criteria', (p.criteria || []).join('\n')); set('f_extra', p.extraNote);
+  set('f_support', p.supportEmail); set('f_notFound', p.notFoundText);
+  note('checkMsg'); note('saveMsg');
+  $('editor').hidden = false; $('editor').scrollIntoView({ behavior: 'smooth' });
+}
+$('cancelBtn').onclick = () => { $('editor').hidden = true; };
+$('f_track').onchange = () => { $('f_prefix').value = $('f_track').value.toUpperCase(); };
+
+/* Read the pre-filled link and pick out field IDs */
+$('f_prefill').addEventListener('change', () => {
+  try {
+    $('f_prefill').value = $('f_prefill').value.trim().replace(/[,.;\s]+$/, '');
+    const u = new URL($('f_prefill').value);
+    for (const [k, v] of u.searchParams) {
+      if (!k.startsWith('entry.')) continue;
+      const val = v.trim().replace(/[,.;]+$/, '').toUpperCase();
+      if (val === 'GROUP' || /^GROUP\s*\d/.test(val)) $('f_eGroup').value = k;
+      else if (val === 'NUMBER' || /^[A-Z]{2}\d{6,}$/.test(val)) $('f_eNumber').value = k;
+      else if (val === 'NAME' || !$('f_eName').value) $('f_eName').value = k;
+    }
+  } catch {}
+});
+
+function collect() {
+  const prefill = $('f_prefill').value.trim();
+  const dl = $('f_deadline').value;
+  return {
+    track: $('f_track').value, cohort: $('f_cohort').value.trim().toLowerCase(), trackName: $('f_trackName').value.trim(),
+    active: $('f_active').value === 'true',
+    groupingSheetId: sheetId($('f_grouping').value), responsesSheetId: $('f_responses').value.trim() ? sheetId($('f_responses').value) : '',
+    projectUnit: $('f_unit').value, numberPrefix: $('f_prefix').value.trim().toUpperCase(),
+    formPrefillBase: prefill ? prefill.split('?')[0] : '',
+    formFields: { group: $('f_eGroup').value.trim(), name: $('f_eName').value.trim(), number: $('f_eNumber').value.trim() },
+    formShortUrl: $('f_short').value.trim(),
+    deadline: dl ? `${dl}:00+01:00` : '', presentationDate: $('f_presentation').value.trim(),
+    title: $('f_title').value.trim(), aim: $('f_aim').value.trim(), brief: $('f_brief').value.trim(),
+    siteUrl: $('f_site').value.trim(), siteLabel: $('f_siteLabel').value.trim(),
+    videoId: $('f_video').value.trim() ? ytId($('f_video').value) : '',
+    steps: lines($('f_steps').value).map(l => { const [a, ...b] = l.split('|'); return [a.trim(), b.join('|').trim()]; }),
+    deliverables: lines($('f_deliverables').value), presentation: $('f_presText').value.trim(),
+    criteria: lines($('f_criteria').value), extraNote: $('f_extra').value.trim(),
+    supportEmail: $('f_support').value.trim(), notFoundText: $('f_notFound').value.trim()
+  };
+}
+
+$('checkBtn').onclick = async () => {
+  const p = collect();
+  if (!p.groupingSheetId) return note('checkMsg', 'err', 'Add the grouping sheet link first.');
+  $('checkBtn').disabled = true; note('checkMsg', 'warn', 'Checking sheets');
+  try {
+    const r = await api('/check', { method: 'POST', body: JSON.stringify(p) });
+    const i = r.issues;
+    const list = (title, arr) => arr.length ? `<p><b>${title} (${arr.length})</b></p><ul>${arr.slice(0,40).map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '';
+    const problems = list('No unique number, so these students cannot look themselves up', i.missingNumber)
+      + list('Unique number in an unusual format, students typing their correct number will not match', i.oddFormat)
+      + list('Same name in two groups', i.nameInTwoGroups)
+      + list('Same unique number twice', i.duplicateNumber)
+      + list('Number from another track (fine if they really are in this track)', i.otherTrackPrefix);
+    const units = `<div class="tablewrap"><table><thead><tr><th>${p.projectUnit === 'subgroup' ? 'Sub-group' : 'Group'}</th><th>Members</th><th>Suggested leader</th><th>WhatsApp link</th><th>Submissions</th></tr></thead><tbody>
+      ${r.units.map(u => `<tr><td>${esc(u.unit)}</td><td>${u.members}</td><td>${esc(u.suggestedLeader)}</td><td>${u.whatsapp ? 'Yes' : 'Missing'}</td><td>${u.submissions}</td></tr>`).join('')}</tbody></table></div>`;
+    $('checkMsg').innerHTML = `<div class="note ok">Sheets connected. ${r.rows} rows read.</div>${units}${problems ? `<div class="note warn">${problems}</div>` : '<div class="note ok">No data problems found.</div>'}`;
+  } catch (e) { note('checkMsg', 'err', esc(e.message)); }
+  finally { $('checkBtn').disabled = false; }
+};
+
+$('editor').onsubmit = async e => {
+  e.preventDefault();
+  const p = collect();
+  const missing = [];
+  if (!p.cohort) missing.push('cohort code'); if (!p.groupingSheetId) missing.push('grouping sheet');
+  if (!p.deadline) missing.push('deadline'); if (!p.title) missing.push('project title');
+  if (!p.formPrefillBase && !p.formShortUrl) missing.push('submission form link');
+  if (missing.length) return note('saveMsg', 'err', `Add the ${missing.join(', ')} before saving.`);
+  $('saveBtn').disabled = true;
+  try { await api('/projects', { method: 'PUT', body: JSON.stringify(p) }); note('saveMsg', 'ok', 'Saved. The project page now shows these settings.'); await loadList(); }
+  catch (err) { note('saveMsg', 'err', esc(err.message)); }
+  finally { $('saveBtn').disabled = false; }
+};
+$('exportBtn').onclick = async () => {
+  const txt = JSON.stringify(collect(), null, 2);
+  try { await navigator.clipboard.writeText(txt); note('saveMsg', 'ok', 'Settings copied.'); } catch { $('importText').value = txt; $('importCard').hidden = false; }
+};
+</script>
+</body>
+</html>
