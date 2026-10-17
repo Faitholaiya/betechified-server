@@ -32,6 +32,12 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 const statusLookup = require('./status-lookup');
 app.use('/api/status', statusLookup);
 
+// ══ TRACK PROJECT PAGES - powers betechified.com/projects and the projects admin page
+// DO NOT REMOVE these lines. trust proxy lets the lookup rate limit see real visitor IPs on Render.
+app.set('trust proxy', 1);
+const projects = require('./projects');
+app.use('/api/projects', projects);
+
 const GEMINI_PROMPT = `You are a verification assistant for BeTechified, an African tech education platform.
 Check whether this screenshot is a WhatsApp chat that contains a message related to BeTechified (a tech education platform, course, or registration).
 
@@ -179,7 +185,7 @@ app.post('/register', async (req, res) => {
     }
 
     const year = '26';
-    const month = '09';
+    const month = '10'; // COHORT MONTH: change this each cohort (10 = October 2026)
     const prefix = course + year + month;
 
     // Check if already registered
