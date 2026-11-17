@@ -185,11 +185,7 @@ app.post('/register', async (req, res) => {
     }
 
     const year = '26';
-<<<<<<< HEAD
     const month = '12';
-=======
-    const month = '11'; // COHORT MONTH: change this each cohort (10 = October 2026)
->>>>>>> 1c21748cbc916e731c423e7840b108e18c91cbc9
     const prefix = course + year + month;
 
     // Check if already registered
